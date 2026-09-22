@@ -2,6 +2,8 @@
 
 ![Gameplay — desktop HUD with MASS_DRIVER and ARC.EXE active](artifacts/prototype_capture.png)
 
+🎬 **[Watch Gameplay Trailer](artifacts/void_daemon_trailer.mp4)** — 30-second highlight reel featuring autonomous weapon processes, patch evolutions, thermal reactor venting, and swarm combat.
+
 This repository contains an executable combat proof for the game plan. It deliberately tests the uncertain part first: whether two auto-running weapon processes become interesting when behavioral patches change their targeting and geometry.
 
 The prototype uses Godot 4.7.1, GDScript, code-drawn visuals, and procedurally synthesized audio — **zero external asset dependencies**.
