@@ -1,0 +1,19 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+TextServer: Added interface "Dummy"
+TextServer: Added interface "ICU / HarfBuzz / Graphite (Built-in)"
+Using "default" pen tablet driver...
+
+TextServer: Primary interface set to: "ICU / HarfBuzz / Graphite (Built-in)".
+CORE API HASH: 3769296884
+EDITOR API HASH: 3146738256
+SceneTreeFTI: traversal method DEFAULT
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2582)
+Loaded builtin CA certificates
+Loading resource: res://src/main.tscn remapped: res://src/main.tscn
+Loading resource: res://src/main.gd remapped: res://src/main.gd
+Completed load for: 'res://src/main.gd' remapped 'res://src/main.gd' at thread -1
+Completed load for: 'res://src/main.tscn' remapped 'res://src/main.tscn' at thread -1
+SMOKE_CONTRACTS_OK deterministic_offer=["DRIVER_RAIL", "VENT_COOLANT", "KINETIC_DAMPERS"]
+SMOKE_START seed=LEAK-TRACE enemies=19 types={ "bit": 10, "vector": 3, "sentry": 5 } boss=true
+SMOKE_OK kills=7 projectiles=12 hostile=9 pickups=7 boss_health=1450

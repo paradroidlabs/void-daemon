@@ -1,0 +1,7 @@
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+
+ERROR: Failed to read the root certificate store.
+   at: get_system_ca_certificates (platform/windows/os_windows.cpp:2582)
+SMOKE_CONTRACTS_OK deterministic_offer=["SHIELD_REBOOT", "KINETIC_DAMPERS", "GROUND_LOOP"]
+SMOKE_START seed=AUTOMATED-TEST enemies=19 types={ "bit": 10, "vector": 5, "sentry": 3 } boss=true
+SMOKE_OK kills=9 projectiles=10 hostile=9 pickups=8 boss_health=1500
