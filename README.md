@@ -1,8 +1,10 @@
 # VOID//DAEMON — playable Godot prototype
 
-This repository now contains an executable combat proof for the game plan. It deliberately tests the uncertain part first: whether two auto-running weapon processes become interesting when behavioral patches change their targeting and geometry.
+![Gameplay — desktop HUD with MASS_DRIVER and ARC.EXE active](artifacts/prototype_capture.png)
 
-The prototype uses Godot 4.7.1, GDScript, code-drawn visuals, and procedurally synthesized audio, so it has no external asset dependencies. A portable Windows editor is present under the ignored `.tools/` directory in this workspace.
+This repository contains an executable combat proof for the game plan. It deliberately tests the uncertain part first: whether two auto-running weapon processes become interesting when behavioral patches change their targeting and geometry.
+
+The prototype uses Godot 4.7.1, GDScript, code-drawn visuals, and procedurally synthesized audio — **zero external asset dependencies**.
 
 ## Run it
 
@@ -108,11 +110,16 @@ SMOKE_OK ... hostile=... boss_health=...
 
 The test first asserts that a seed and build state return three deterministic, unique upgrade cards. It then uses the portable Godot console build for a five-second integrated combat simulation.
 
-## Visual QA captures
+## Screenshots
 
-- Desktop: [`artifacts/prototype_capture.png`](artifacts/prototype_capture.png)
-- Touch overlay: [`artifacts/prototype_touch_capture.png`](artifacts/prototype_touch_capture.png)
-- Responsive end screen: [`artifacts/end_screen_capture.png`](artifacts/end_screen_capture.png)
+### Desktop gameplay
+![Desktop — terminal HUD, grid arena, weapon projectiles](artifacts/prototype_capture.png)
+
+### Touch controls
+![Touch overlay — virtual stick, drag-to-aim, VENT button](artifacts/prototype_touch_capture.png)
+
+### End-of-run telemetry
+![Process Terminated — run stats and upgrade build summary](artifacts/end_screen_capture.png)
 
 Regenerate the long-build end-screen regression capture with:
 
