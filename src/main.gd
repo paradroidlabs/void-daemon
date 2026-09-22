@@ -174,11 +174,15 @@ func _unhandled_input(event: InputEvent) -> void:
 				if not boss_spawned:
 					elapsed_time = BOSS_SPAWN_TIME - 0.1
 					hud.flash_log("DEBUG // FAST-FORWARD TO WATCHDOG", MAGENTA)
+			KEY_ESCAPE, KEY_P:
+				hud.toggle_pause()
 	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 		_try_vent()
 	if event is InputEventJoypadButton and event.pressed:
 		if event.button_index == JOY_BUTTON_A or event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
 			_try_vent()
+		elif event.button_index == JOY_BUTTON_START:
+			hud.toggle_pause()
 
 
 func _update_input_intents() -> void:

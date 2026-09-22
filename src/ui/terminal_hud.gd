@@ -11,6 +11,7 @@ signal restart_requested
 signal touch_move_changed(direction: Vector2)
 signal touch_vent_pressed
 signal touch_target_bias(direction: Vector2, active: bool)
+signal pause_toggled(is_paused: bool)
 
 const CYAN := Color(0.35, 0.95, 1.0, 1.0)
 const CYAN_DIM := Color(0.13, 0.50, 0.55, 1.0)
@@ -55,6 +56,13 @@ var _end_title: Label
 var _end_stats_scroll: ScrollContainer
 var _end_stats: Label
 var _restart_button: Button
+var _pause_overlay: ColorRect
+var _pause_center: CenterContainer
+var _pause_panel: PanelContainer
+var _resume_button: Button
+var _pause_restart_button: Button
+var _quit_button: Button
+var _is_paused := false
 
 var _modal_active := false
 var _paused_before_modal := false
@@ -81,6 +89,7 @@ func _ready() -> void:
 	_build_touch_controls()
 	_build_upgrade_overlay()
 	_build_end_overlay()
+	_build_pause_overlay()
 	set_touch_controls_visible(DisplayServer.is_touchscreen_available())
 	get_viewport().size_changed.connect(_layout_touch_controls)
 	get_viewport().size_changed.connect(_layout_end_screen)
@@ -224,6 +233,30 @@ func set_touch_controls_visible(visible: bool) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _pause_overlay.visible:
+		if event is InputEventKey:
+			var key_event := event as InputEventKey
+			if key_event.pressed and not key_event.echo:
+				if key_event.keycode == KEY_ESCAPE or key_event.keycode == KEY_P:
+					get_viewport().set_input_as_handled()
+					toggle_pause(false)
+					return
+				elif key_event.keycode == KEY_R:
+					get_viewport().set_input_as_handled()
+					toggle_pause(false)
+					_on_restart_pressed()
+					return
+				elif key_event.keycode == KEY_Q:
+					get_viewport().set_input_as_handled()
+					get_tree().quit()
+					return
+		if event is InputEventJoypadButton and event.pressed:
+			if event.button_index == JOY_BUTTON_START or event.button_index == JOY_BUTTON_B:
+				get_viewport().set_input_as_handled()
+				toggle_pause(false)
+				return
+		return
+
 	if _upgrade_overlay.visible:
 		if event is InputEventKey:
 			var key_event := event as InputEventKey
@@ -241,6 +274,19 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				_on_restart_pressed()
 		return
+
+	if event is InputEventKey:
+		var key_event := event as InputEventKey
+		if key_event.pressed and not key_event.echo:
+			if key_event.keycode == KEY_ESCAPE or key_event.keycode == KEY_P:
+				get_viewport().set_input_as_handled()
+				toggle_pause(true)
+				return
+	if event is InputEventJoypadButton and event.pressed:
+		if event.button_index == JOY_BUTTON_START:
+			get_viewport().set_input_as_handled()
+			toggle_pause(true)
+			return
 
 
 func _build_theme_and_root() -> void:
@@ -490,6 +536,109 @@ func _build_end_overlay() -> void:
 	_restart_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_restart_button.pressed.connect(_on_restart_pressed)
 	rows.add_child(_restart_button)
+
+
+func _build_pause_overlay() -> void:
+	_pause_overlay = ColorRect.new()
+	_pause_overlay.name = "PauseOverlay"
+	_pause_overlay.color = Color(0.005, 0.01, 0.016, 0.88)
+	_pause_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_pause_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	_pause_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
+	_pause_overlay.visible = false
+	_root.add_child(_pause_overlay)
+
+	_pause_center = CenterContainer.new()
+	_pause_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_pause_overlay.add_child(_pause_center)
+
+	_pause_panel = PanelContainer.new()
+	_pause_panel.custom_minimum_size = Vector2(460.0, 280.0)
+	_pause_panel.add_theme_stylebox_override("panel", _make_box(Color(0.01, 0.035, 0.045, 0.99), CYAN, 2, 24.0))
+	_pause_center.add_child(_pause_panel)
+
+	var rows := VBoxContainer.new()
+	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rows.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	rows.add_theme_constant_override("separation", 14)
+	_pause_panel.add_child(rows)
+
+	var title := _new_label("PROCESS SUSPENDED", 26, AMBER)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rows.add_child(title)
+
+	var prompt := _new_label("// SYSTEM STANDBY // SELECT OPERATION", 13, CYAN_DIM)
+	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rows.add_child(prompt)
+
+	_add_rule(rows)
+
+	_resume_button = Button.new()
+	_resume_button.name = "ResumeButton"
+	_resume_button.text = "RESUME PROCESS  [ESC / P]"
+	_resume_button.custom_minimum_size = Vector2(0.0, 48.0)
+	_resume_button.focus_mode = Control.FOCUS_ALL
+	_resume_button.add_theme_font_size_override("font_size", 16)
+	_resume_button.add_theme_color_override("font_color", CYAN)
+	_resume_button.add_theme_stylebox_override("normal", _make_box(Color(0.015, 0.04, 0.05, 0.95), CYAN_DIM, 2, 8.0))
+	_resume_button.add_theme_stylebox_override("hover", _make_box(Color(0.05, 0.12, 0.15, 0.98), CYAN, 2, 8.0))
+	_resume_button.add_theme_stylebox_override("focus", _make_box(Color(0.05, 0.12, 0.15, 0.98), CYAN, 2, 8.0))
+	_resume_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_resume_button.pressed.connect(func(): toggle_pause(false))
+	rows.add_child(_resume_button)
+
+	_pause_restart_button = Button.new()
+	_pause_restart_button.name = "PauseRestartButton"
+	_pause_restart_button.text = "RESTART RUN  [R]"
+	_pause_restart_button.custom_minimum_size = Vector2(0.0, 44.0)
+	_pause_restart_button.focus_mode = Control.FOCUS_ALL
+	_pause_restart_button.add_theme_font_size_override("font_size", 15)
+	_pause_restart_button.add_theme_color_override("font_color", AMBER)
+	_pause_restart_button.add_theme_stylebox_override("normal", _make_box(Color(0.015, 0.04, 0.05, 0.95), AMBER * 0.7, 1, 8.0))
+	_pause_restart_button.add_theme_stylebox_override("hover", _make_box(Color(0.05, 0.12, 0.15, 0.98), AMBER, 2, 8.0))
+	_pause_restart_button.add_theme_stylebox_override("focus", _make_box(Color(0.05, 0.12, 0.15, 0.98), AMBER, 2, 8.0))
+	_pause_restart_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_pause_restart_button.pressed.connect(func():
+		toggle_pause(false)
+		_on_restart_pressed()
+	)
+	rows.add_child(_pause_restart_button)
+
+	_quit_button = Button.new()
+	_quit_button.name = "QuitButton"
+	_quit_button.text = "QUIT TO DESKTOP  [Q]"
+	_quit_button.custom_minimum_size = Vector2(0.0, 40.0)
+	_quit_button.focus_mode = Control.FOCUS_ALL
+	_quit_button.add_theme_font_size_override("font_size", 14)
+	_quit_button.add_theme_color_override("font_color", RED)
+	_quit_button.add_theme_stylebox_override("normal", _make_box(Color(0.015, 0.04, 0.05, 0.95), RED * 0.7, 1, 8.0))
+	_quit_button.add_theme_stylebox_override("hover", _make_box(Color(0.05, 0.12, 0.15, 0.98), RED, 2, 8.0))
+	_quit_button.add_theme_stylebox_override("focus", _make_box(Color(0.05, 0.12, 0.15, 0.98), RED, 2, 8.0))
+	_quit_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	_quit_button.pressed.connect(func(): get_tree().quit())
+	rows.add_child(_quit_button)
+
+
+## Opens or closes the pause overlay and toggles scene tree pause.
+func toggle_pause(force_state = null) -> void:
+	if _upgrade_overlay.visible or _end_overlay.visible:
+		return
+	if force_state != null:
+		_is_paused = bool(force_state)
+	else:
+		_is_paused = not _is_paused
+
+	_pause_overlay.visible = _is_paused
+	if _is_paused:
+		_begin_modal()
+		_resume_button.grab_focus()
+	else:
+		_end_modal()
+	pause_toggled.emit(_is_paused)
+
+
+func is_paused() -> bool:
+	return _is_paused
 
 
 func _make_meter(caption: String, fill_color: Color) -> Dictionary:
