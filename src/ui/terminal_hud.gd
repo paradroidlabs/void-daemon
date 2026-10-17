@@ -12,6 +12,13 @@ signal touch_move_changed(direction: Vector2)
 signal touch_vent_pressed
 signal touch_target_bias(direction: Vector2, active: bool)
 signal pause_toggled(is_paused: bool)
+signal unleash_started
+signal unleash_released
+signal combat_cancel_requested
+signal lab_fixture_requested(value: String)
+signal lab_loadout_requested(value: String)
+signal lab_reset_requested
+signal lab_report_requested
 
 const CYAN := Color(0.35, 0.95, 1.0, 1.0)
 const CYAN_DIM := Color(0.13, 0.50, 0.55, 1.0)
@@ -27,8 +34,8 @@ const TOUCH_STICK_SIZE := 144.0
 const TOUCH_STICK_KNOB_SIZE := 58.0
 const TOUCH_MARGIN := 24.0
 const MODAL_EDGE_PADDING := 16.0
-const END_PANEL_MAX_WIDTH := 680.0
-const END_PANEL_MAX_HEIGHT := 520.0
+const END_PANEL_MAX_WIDTH := 1800.0
+const ScorecardScript = preload("res://src/ui/run_scorecard.gd")
 
 var _root: Control
 var _status_panel: PanelContainer
@@ -50,11 +57,12 @@ var _upgrade_overlay: ColorRect
 var _upgrade_list: VBoxContainer
 var _upgrade_buttons: Array[Button] = []
 var _end_overlay: ColorRect
-var _end_center: CenterContainer
-var _end_panel: PanelContainer
-var _end_title: Label
-var _end_stats_scroll: ScrollContainer
-var _end_stats: Label
+var _end_panel: Control
+var _end_card: Control
+var _end_tabs: HBoxContainer
+var _end_tab_buttons: Array[Button] = []
+var _end_footer: Label
+var _end_report: Dictionary = {}
 var _restart_button: Button
 var _pause_overlay: ColorRect
 var _pause_center: CenterContainer
@@ -79,6 +87,17 @@ var _target_touch_index := -1
 var _target_mouse_active := false
 var _target_origin := Vector2.ZERO
 var _last_move_direction := Vector2.ZERO
+var _combo_mode := false
+var _lab_mode := false
+var _phase_swipe_consumed := false
+var _target_hint: Label
+var _rack_label: Label
+var _rack_meter: ProgressBar
+var _rack_panel: PanelContainer
+var _lab_bar: HBoxContainer
+var _fixture_picker: OptionButton
+var _loadout_picker: OptionButton
+var _touch_pause: Button
 
 
 func _ready() -> void:
@@ -87,6 +106,7 @@ func _ready() -> void:
 	_build_theme_and_root()
 	_build_status()
 	_build_touch_controls()
+	_build_combo_controls()
 	_build_upgrade_overlay()
 	_build_end_overlay()
 	_build_pause_overlay()
@@ -149,6 +169,21 @@ func set_status(status: Dictionary) -> void:
 
 	if status.has("message"):
 		flash_log(str(status["message"]), CYAN)
+	if _combo_mode:
+		var cooldown := float(status.get("phase_cooldown", 0))
+		_vent_label.text = "[PHASE: READY]" if cooldown <= 0 else "[PHASE: %.1fs]" % cooldown
+		_vent_label.add_theme_color_override("font_color", GREEN if cooldown <= 0 else AMBER)
+		_vent_button.text = "PHASE SKIP\nTAP / SLIDE" if cooldown <= 0 else "PHASE SKIP\n%.1fs" % cooldown
+		var charging := bool(status.get("rack_charging", false))
+		var reload := float(status.get("rack_reload", 0))
+		if charging:
+			var phase := "GRAVITON ACTIVE" if status.get("field_active", false) else ("FIELD EXPIRED / RACK ARMED" if status.get("gravity_enabled", true) else "SALVO ARMING")
+			_rack_label.text = "%s  /  SALVO %d/6  /  AFFORDABLE %d  /  RELEASE TO FIRE" % [phase, status.get("rack_loaded", 0), status.get("rack_affordable", 0)]
+		elif reload > 0:
+			_rack_label.text = "RACK RELOADING %.1fs  /  ARC + DRIVER FOLLOW-THROUGH" % reload
+		else:
+			_rack_label.text = "HOLD M1: GRAVITON + LOAD  /  RELEASE: SALVO  /  SHIFT OR SPACE: PHASE"
+		_rack_meter.value = float(status.get("rack_ratio", 0)) * 100 if charging else (0 if reload > 0 else 100)
 
 
 ## Opens a modal, paused upgrade picker. Choices can be strings or dictionaries.
@@ -201,15 +236,10 @@ func show_end_screen(victory: bool, stats: Dictionary) -> void:
 	_end_overlay.visible = true
 	_begin_modal()
 
-	if victory:
-		_end_title.text = "TRANSMISSION COMPLETE"
-		_end_title.add_theme_color_override("font_color", GREEN)
-	else:
-		_end_title.text = "PROCESS TERMINATED"
-		_end_title.add_theme_color_override("font_color", RED)
-	_end_stats.text = _format_stats(stats)
+	_end_report = stats.duplicate(true)
+	_end_card.set_report(victory, _end_report)
+	_set_end_page(0)
 	_layout_end_screen()
-	call_deferred("_reset_end_scroll")
 	call_deferred("_focus_restart")
 
 
@@ -230,6 +260,53 @@ func flash_log(message: String, color: Color = CYAN) -> void:
 func set_touch_controls_visible(visible: bool) -> void:
 	_touch_requested_visible = visible
 	_apply_touch_visibility()
+
+
+func set_combo_mode(enabled: bool, lab: bool = false) -> void:
+	_combo_mode = enabled
+	_lab_mode = lab
+	_rack_panel.visible = enabled
+	_lab_bar.visible = lab
+	_vent_button.text = "PHASE SKIP\nTAP / SLIDE" if enabled else "VENT\n[ TAP ]"
+	_vent_button.add_theme_font_size_override("font_size", 13 if enabled else 16)
+	_vent_button.add_theme_stylebox_override("normal", _make_box(Color(0.12, 0.075, 0.015, 0.88), AMBER, 2, 8 if enabled else 16))
+	_vent_button.add_theme_stylebox_override("pressed", _make_box(AMBER, AMBER, 3, 8 if enabled else 16))
+	_target_hint.text = "HOLD + DRAG\nGRAVITON / SALVO\nRELEASE TO FIRE" if enabled else "[ DRAG TO BIAS FIRE ]"
+	_target_zone.mouse_filter = Control.MOUSE_FILTER_STOP if enabled else Control.MOUSE_FILTER_PASS
+	_layout_touch_controls()
+
+
+func set_lab_selection(fixture: String, loadout: String) -> void:
+	_fixture_picker.select(maxi(0, ["cluster", "dispersed", "boss"].find(fixture)))
+	_loadout_picker.select(maxi(0, ["salvo", "gravity", "chain"].find(loadout)))
+
+
+func clear_combat_gesture() -> void:
+	_phase_swipe_consumed = true
+	_reset_target_bias()
+	_reset_stick()
+	combat_cancel_requested.emit()
+
+
+func _input(event: InputEvent) -> void:
+	if not _combo_mode or _modal_active:
+		return
+	if event is InputEventScreenDrag and event.index == _target_touch_index:
+		if _vent_button.get_global_rect().has_point(event.position):
+			_consume_phase_swipe()
+			get_viewport().set_input_as_handled()
+	elif event is InputEventScreenTouch and not event.pressed and event.index == _target_touch_index and _phase_swipe_consumed:
+		_target_touch_index = -1
+		touch_target_bias.emit(Vector2.ZERO, false)
+		get_viewport().set_input_as_handled()
+
+
+func _consume_phase_swipe() -> void:
+	if _phase_swipe_consumed:
+		return
+	_phase_swipe_consumed = true
+	combat_cancel_requested.emit()
+	touch_vent_pressed.emit()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -273,6 +350,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			if key_event.pressed and not key_event.echo and key_event.keycode == KEY_R:
 				get_viewport().set_input_as_handled()
 				_on_restart_pressed()
+			elif key_event.pressed and not key_event.echo and _end_tabs.visible:
+				var page_index := _choice_index_for_key(key_event)
+				if page_index >= 0 and page_index < _end_tab_buttons.size() and _end_tab_buttons[page_index].visible:
+					_set_end_page(page_index)
+					get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventKey:
@@ -438,17 +520,68 @@ func _build_touch_controls() -> void:
 	_vent_button.pressed.connect(_on_touch_vent_pressed)
 	_touch_root.add_child(_vent_button)
 
-	_target_zone = Control.new()
+	_target_zone = Panel.new()
+	_target_zone.add_theme_stylebox_override("panel", _make_box(Color(0.08, 0.06, 0.15, 0.48), Color("8272ad"), 1, 8))
 	_target_zone.name = "TargetBiasSurface"
 	_target_zone.mouse_filter = Control.MOUSE_FILTER_PASS
 	_target_zone.gui_input.connect(_on_target_gui_input)
 	_touch_root.add_child(_target_zone)
-	var target_hint := _new_label("[ DRAG TO BIAS FIRE ]", 12, CYAN_DIM)
-	target_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	target_hint.offset_top = -28.0
-	target_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	target_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_target_zone.add_child(target_hint)
+	_target_hint = _new_label("[ DRAG TO BIAS FIRE ]", 13, CYAN)
+	_target_hint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_target_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_target_hint.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_target_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_target_zone.add_child(_target_hint)
+	_touch_pause = Button.new()
+	_touch_pause.text = "II"
+	_touch_pause.pressed.connect(func(): toggle_pause())
+	_touch_root.add_child(_touch_pause)
+
+
+func _build_combo_controls() -> void:
+	_rack_panel = PanelContainer.new()
+	_rack_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_rack_panel.add_theme_stylebox_override("panel", _make_box(Color("111e30"), Color("7d70a8"), 1, 10))
+	_root.add_child(_rack_panel)
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_rack_panel.add_child(stack)
+	_rack_label = _new_label("", 12, Color("d4c7ff"))
+	_rack_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_rack_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(_rack_label)
+	_rack_meter = ProgressBar.new()
+	_rack_meter.show_percentage = false
+	_rack_meter.custom_minimum_size.y = 6
+	_rack_meter.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_rack_meter.add_theme_stylebox_override("fill", _make_box(Color("b4a0ff"), TRANSPARENT, 0, 0))
+	stack.add_child(_rack_meter)
+	_lab_bar = HBoxContainer.new()
+	_lab_bar.add_theme_constant_override("separation", 8)
+	_root.add_child(_lab_bar)
+	_fixture_picker = OptionButton.new()
+	for caption in ["CLUSTER [F1]", "DISPERSED [F2]", "BOSS LANE [F3]"]:
+		_fixture_picker.add_item(caption)
+	_fixture_picker.item_selected.connect(func(index: int): lab_fixture_requested.emit(["cluster", "dispersed", "boss"][index]))
+	_lab_bar.add_child(_fixture_picker)
+	_loadout_picker = OptionButton.new()
+	for caption in ["SALVO ONLY [F4]", "GRAVITON + SALVO [F5]", "FULL CHAIN [F6]"]:
+		_loadout_picker.add_item(caption)
+	_loadout_picker.item_selected.connect(func(index: int): lab_loadout_requested.emit(["salvo", "gravity", "chain"][index]))
+	_lab_bar.add_child(_loadout_picker)
+	var reset := Button.new()
+	reset.text = "RESET [R]"
+	reset.pressed.connect(func(): lab_reset_requested.emit())
+	_lab_bar.add_child(reset)
+	var report := Button.new()
+	report.text = "REPORT [F7]"
+	report.pressed.connect(func(): lab_report_requested.emit())
+	_lab_bar.add_child(report)
+	for control in _lab_bar.get_children():
+		control.custom_minimum_size.y = 44
+		control.add_theme_font_size_override("font_size", 13)
+	_rack_panel.visible = false
+	_lab_bar.visible = false
 
 
 func _build_upgrade_overlay() -> void:
@@ -490,52 +623,51 @@ func _build_upgrade_overlay() -> void:
 func _build_end_overlay() -> void:
 	_end_overlay = ColorRect.new()
 	_end_overlay.name = "EndOverlay"
-	_end_overlay.color = Color(0.005, 0.01, 0.016, 0.94)
+	_end_overlay.color = Color("09131d")
 	_end_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_end_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	_end_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
 	_end_overlay.visible = false
 	_root.add_child(_end_overlay)
-	_end_center = CenterContainer.new()
-	_end_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_end_overlay.add_child(_end_center)
-	_end_panel = PanelContainer.new()
-	_end_panel.clip_contents = true
-	_end_panel.add_theme_stylebox_override("panel", _make_box(Color(0.01, 0.035, 0.045, 0.99), CYAN_DIM, 2, 24.0))
-	_end_center.add_child(_end_panel)
-	var rows := VBoxContainer.new()
-	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rows.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	rows.add_theme_constant_override("separation", 16)
-	_end_panel.add_child(rows)
-	_end_title = _new_label("PROCESS TERMINATED", 28, RED)
-	_end_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_end_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_end_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	rows.add_child(_end_title)
-	_add_rule(rows)
-	_end_stats_scroll = ScrollContainer.new()
-	_end_stats_scroll.name = "StatsScroll"
-	_end_stats_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_end_stats_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	_end_stats_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_end_stats_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_end_stats_scroll.custom_minimum_size.y = 72.0
-	rows.add_child(_end_stats_scroll)
-	_end_stats = _new_label("", 17, CYAN)
-	_end_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_end_stats.vertical_alignment = VERTICAL_ALIGNMENT_TOP
-	_end_stats.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_end_stats.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_end_stats.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_end_stats_scroll.add_child(_end_stats)
+	_end_panel = Control.new()
+	_end_panel.name = "RunScorecardPanel"
+	_end_overlay.add_child(_end_panel)
+	_end_card = ScorecardScript.new()
+	_end_card.name = "RunScorecard"
+	_end_panel.add_child(_end_card)
+	_end_tabs = HBoxContainer.new()
+	_end_tabs.add_theme_constant_override("separation", 6)
+	_end_panel.add_child(_end_tabs)
+	for index in range(5):
+		var tab := Button.new()
+		tab.text = ["RUN", "ARSENAL", "SYSTEMS", "BUILD", "KIT"][index]
+		tab.toggle_mode = true
+		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tab.add_theme_font_size_override("font_size", 11)
+		tab.add_theme_stylebox_override("normal", _make_box(INK_LIGHT, CYAN_DIM, 1, 4))
+		tab.add_theme_stylebox_override("pressed", _make_box(Color("23544f"), CYAN, 1, 4))
+		tab.add_theme_color_override("font_pressed_color", Color.WHITE)
+		tab.pressed.connect(_set_end_page.bind(index))
+		_end_tabs.add_child(tab)
+		_end_tab_buttons.append(tab)
+	_end_footer = _new_label("FLIGHT RECORDER  /  RETRY THE SAME SEED", 11, Color("8ba5ad"))
+	_end_footer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_end_panel.add_child(_end_footer)
 	_restart_button = Button.new()
 	_restart_button.text = "RESTART PROCESS  [R]"
-	_restart_button.custom_minimum_size.y = 66.0
+	_restart_button.add_theme_stylebox_override("normal", _make_box(Color("153c3e"), CYAN_DIM, 1, 8))
+	_restart_button.add_theme_stylebox_override("focus", _make_box(TRANSPARENT, CYAN, 1, 8))
 	_restart_button.focus_mode = Control.FOCUS_ALL
 	_restart_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_restart_button.pressed.connect(_on_restart_pressed)
-	rows.add_child(_restart_button)
+	_end_panel.add_child(_restart_button)
+
+
+func _set_end_page(index: int) -> void:
+	_end_card.page = clampi(index, 0, 4)
+	_end_card.queue_redraw()
+	for i in _end_tab_buttons.size():
+		_end_tab_buttons[i].set_pressed_no_signal(i == _end_card.page)
 
 
 func _build_pause_overlay() -> void:
@@ -704,6 +836,8 @@ func _set_meter(bar: ProgressBar, label: Label, current: float, maximum: float, 
 
 
 func _begin_modal() -> void:
+	if _combo_mode:
+		clear_combat_gesture()
 	if not _modal_active:
 		_paused_before_modal = get_tree().paused
 		_modal_active = true
@@ -724,6 +858,9 @@ func _apply_touch_visibility() -> void:
 		return
 	var should_show := _touch_requested_visible and not _modal_active
 	_touch_root.visible = should_show
+	if is_instance_valid(_rack_panel):
+		_rack_panel.visible = _combo_mode and not _modal_active
+		_lab_bar.visible = _lab_mode and not _modal_active
 	if not should_show:
 		_reset_stick()
 		_reset_target_bias()
@@ -746,12 +883,20 @@ func _layout_touch_controls() -> void:
 	_vent_button.size = Vector2(128.0, 96.0)
 	_target_zone.position = Vector2(viewport_size.x * 0.5, safe_top + 136.0)
 	_target_zone.size = Vector2(maxf(viewport_size.x * 0.5 - safe_right, 0.0), maxf(viewport_size.y - safe_top - safe_bottom - 310.0, 80.0))
+	if _combo_mode:
+		_target_zone.position = Vector2(viewport_size.x - safe_right - 256, viewport_size.y - safe_bottom - 330)
+		_target_zone.size = Vector2(220, 178)
+	_touch_pause.position = Vector2(viewport_size.x - safe_right - 68, safe_top + 154)
+	_touch_pause.size = Vector2(44, 44)
+	if is_instance_valid(_rack_panel):
+		_rack_panel.position = Vector2(viewport_size.x * 0.25, viewport_size.y - safe_bottom - 100)
+		_rack_panel.size = Vector2(viewport_size.x * 0.48, 72)
+		_lab_bar.position = Vector2(safe_left + 24, safe_top + 154)
 
 
 func _layout_end_screen() -> void:
-	if not is_instance_valid(_end_center) or not is_instance_valid(_end_panel):
+	if not is_instance_valid(_end_panel):
 		return
-	var viewport_size := get_viewport().get_visible_rect().size
 	var safe_rect := _get_safe_viewport_rect()
 	var padding := minf(MODAL_EDGE_PADDING, minf(safe_rect.size.x, safe_rect.size.y) * 0.04)
 	var available_size := Vector2(
@@ -759,28 +904,32 @@ func _layout_end_screen() -> void:
 		maxf(safe_rect.size.y - padding * 2.0, 1.0)
 	)
 
-	# CenterContainer offsets are relative to its full-viewport anchors. This
-	# keeps the modal inside notches, rounded corners, and phone home indicators.
-	_end_center.offset_left = safe_rect.position.x + padding
-	_end_center.offset_top = safe_rect.position.y + padding
-	_end_center.offset_right = safe_rect.end.x - viewport_size.x - padding
-	_end_center.offset_bottom = safe_rect.end.y - viewport_size.y - padding
-
-	# The explicit height turns the stats area into the flexible/scrollable part
-	# of the modal. The title and restart button remain outside that scroller.
-	_end_panel.custom_minimum_size = Vector2(
-		minf(END_PANEL_MAX_WIDTH, available_size.x),
-		minf(END_PANEL_MAX_HEIGHT, available_size.y)
-	)
-	var narrow := available_size.x < 420.0
-	var compact := available_size.x < 320.0
-	var panel_margin := 12.0 if compact else 24.0
-	_end_panel.add_theme_stylebox_override("panel", _make_box(Color(0.01, 0.035, 0.045, 0.99), CYAN_DIM, 2, panel_margin))
-	_end_title.add_theme_font_size_override("font_size", 22 if narrow else 28)
-	_end_stats.add_theme_font_size_override("font_size", 14 if narrow else 17)
-	_restart_button.text = "RESTART  [R]" if compact else "RESTART PROCESS  [R]"
-	_restart_button.add_theme_font_size_override("font_size", 14 if compact else 16)
-	_end_stats_scroll.custom_minimum_size.y = minf(96.0, maxf(36.0, available_size.y - 220.0))
+	# canvas_items retains a large logical viewport in small windows. Counter
+	# its downscale so page selection and 44px targets use the displayed size.
+	var ui_scale := 1.0
+	var window_size := Vector2(DisplayServer.window_get_size())
+	if DisplayServer.get_name() != "headless" and window_size.x > 0 and window_size.y > 0:
+		var viewport_size := get_viewport().get_visible_rect().size
+		ui_scale = maxf(1.0, minf(viewport_size.x / window_size.x, viewport_size.y / window_size.y))
+	_end_panel.scale = Vector2.ONE * ui_scale
+	_end_panel.size = Vector2(minf(END_PANEL_MAX_WIDTH, available_size.x / ui_scale), available_size.y / ui_scale)
+	_end_panel.position = safe_rect.position + (safe_rect.size - _end_panel.size * ui_scale) * 0.5
+	var panel_size := _end_panel.size
+	var compact := panel_size.x < 940 or panel_size.y - 58 < 530
+	_end_tabs.visible = compact
+	_end_tab_buttons[4].visible = not _end_card.data.get("combo", {}).is_empty()
+	for index in _end_tab_buttons.size():
+		_end_tab_buttons[index].text = (["RUN", "GUNS", "SHIP", "BUILD", "KIT"] if panel_size.x < 420 else ["RUN", "ARSENAL", "SYSTEMS", "BUILD", "KIT"])[index]
+	_end_card.position = Vector2.ZERO
+	_end_card.size = Vector2(panel_size.x, panel_size.y - (106 if compact else 58))
+	_end_tabs.position = Vector2(0, panel_size.y - 98)
+	_end_tabs.size = Vector2(panel_size.x, 44)
+	_restart_button.position = Vector2(maxf(0, panel_size.x - 300), panel_size.y - 44)
+	_restart_button.size = Vector2(minf(panel_size.x, 300), 44)
+	_restart_button.add_theme_font_size_override("font_size", 14)
+	_end_footer.visible = panel_size.x > 700
+	_end_footer.position = Vector2(2, panel_size.y - 30)
+	_end_footer.size = Vector2(maxf(panel_size.x - 320, 1), 24)
 
 
 func _get_safe_viewport_rect() -> Rect2:
@@ -808,7 +957,8 @@ func _on_stick_gui_input(event: InputEvent) -> void:
 		var touch := event as InputEventScreenTouch
 		if touch.pressed and _stick_touch_index < 0:
 			_stick_touch_index = touch.index
-			_set_stick_position(touch.position - _stick_zone.global_position)
+			# gui_input positions are already local to the receiving Control.
+			_set_stick_position(touch.position)
 			_stick_zone.accept_event()
 		elif not touch.pressed and touch.index == _stick_touch_index:
 			_stick_touch_index = -1
@@ -817,7 +967,7 @@ func _on_stick_gui_input(event: InputEvent) -> void:
 	elif event is InputEventScreenDrag:
 		var drag := event as InputEventScreenDrag
 		if drag.index == _stick_touch_index:
-			_set_stick_position(drag.position - _stick_zone.global_position)
+			_set_stick_position(drag.position)
 			_stick_zone.accept_event()
 	elif event is InputEventMouseButton:
 		var mouse_button := event as InputEventMouseButton
@@ -868,15 +1018,22 @@ func _on_target_gui_input(event: InputEvent) -> void:
 		if touch.pressed and _target_touch_index < 0:
 			_target_touch_index = touch.index
 			_target_origin = touch.position
+			_phase_swipe_consumed = false
 			touch_target_bias.emit(Vector2.ZERO, true)
+			if _combo_mode:
+				unleash_started.emit()
 			_target_zone.accept_event()
 		elif not touch.pressed and touch.index == _target_touch_index:
+			if _combo_mode and not _phase_swipe_consumed:
+				unleash_released.emit()
 			_target_touch_index = -1
 			touch_target_bias.emit(Vector2.ZERO, false)
 			_target_zone.accept_event()
 	elif event is InputEventScreenDrag:
 		var drag := event as InputEventScreenDrag
 		if drag.index == _target_touch_index:
+			if _combo_mode and _vent_button.get_global_rect().has_point(_target_zone.global_position + drag.position):
+				_consume_phase_swipe()
 			_emit_target_drag(drag.position)
 			_target_zone.accept_event()
 	elif event is InputEventMouseButton:
@@ -886,10 +1043,17 @@ func _on_target_gui_input(event: InputEvent) -> void:
 			if _target_mouse_active:
 				_target_origin = mouse_button.global_position
 				touch_target_bias.emit(Vector2.ZERO, true)
+				_phase_swipe_consumed = false
+				if _combo_mode:
+					unleash_started.emit()
 			else:
+				if _combo_mode and not _phase_swipe_consumed:
+					unleash_released.emit()
 				touch_target_bias.emit(Vector2.ZERO, false)
 			_target_zone.accept_event()
 	elif event is InputEventMouseMotion and _target_mouse_active:
+		if _combo_mode and _vent_button.get_global_rect().has_point(event.global_position):
+			_consume_phase_swipe()
 		_emit_target_drag((event as InputEventMouseMotion).global_position)
 		_target_zone.accept_event()
 
@@ -904,6 +1068,8 @@ func _emit_target_drag(screen_position: Vector2) -> void:
 
 func _reset_target_bias() -> void:
 	if _target_touch_index >= 0 or _target_mouse_active:
+		if _combo_mode:
+			combat_cancel_requested.emit()
 		touch_target_bias.emit(Vector2.ZERO, false)
 	_target_touch_index = -1
 	_target_mouse_active = false
@@ -932,11 +1098,6 @@ func _focus_first_upgrade() -> void:
 func _focus_restart() -> void:
 	if _end_overlay.visible:
 		_restart_button.grab_focus()
-
-
-func _reset_end_scroll() -> void:
-	if is_instance_valid(_end_stats_scroll):
-		_end_stats_scroll.scroll_vertical = 0
 
 
 func _clear_upgrade_buttons() -> void:
@@ -986,6 +1147,19 @@ func _format_choice(choice: Variant, index: int) -> String:
 func _format_stats(stats: Dictionary) -> String:
 	if stats.is_empty():
 		return "NO TELEMETRY RECOVERED"
+	if stats.has("sections"):
+		var report := PackedStringArray()
+		for section in stats["sections"]:
+			report.append("[ %s ]" % String(section.get("title", "STATS")))
+			var rows: Dictionary = section.get("rows", {})
+			for caption in rows:
+				var value := str(rows[caption])
+				if value.contains("\n"):
+					report.append("%s\n%s" % [String(caption).to_upper(), value])
+				else:
+					report.append("%s  ::  %s" % [String(caption).to_upper(), value])
+			report.append("")
+		return "\n".join(report)
 	var preferred_keys := ["time", "kills", "level", "damage", "seed", "sector", "build"]
 	var lines := PackedStringArray()
 	var used := {}
@@ -1013,6 +1187,10 @@ func _format_time(value: Variant) -> String:
 	var minutes := int(seconds) / 60
 	var remainder := fmod(seconds, 60.0)
 	return "%02d:%04.1f" % [minutes, remainder]
+
+
+func format_duration(seconds: float) -> String:
+	return _format_time(seconds)
 
 
 func _pick_text(data: Dictionary, keys: Array, fallback: String) -> String:

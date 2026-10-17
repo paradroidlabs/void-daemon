@@ -10,6 +10,7 @@ const UpgradeCatalogScript := preload("res://src/systems/upgrade_catalog.gd")
 const TerminalHUDScript := preload("res://src/ui/terminal_hud.gd")
 const ArenaBackdropScript := preload("res://src/world/arena_backdrop.gd")
 const SynthAudioScript := preload("res://src/audio/synth_audio.gd")
+const GravitonSalvoScript := preload("res://src/systems/graviton_salvo.gd")
 
 const CYAN := Color("68f7e5")
 const GREEN := Color("73ff9f")
@@ -32,6 +33,14 @@ var world_root: Node2D
 var backdrop: ArenaBackdrop
 var boss: WatchdogBoss
 var synth_audio: SynthAudio
+var graviton: GravitonSalvo
+var _combo_mode := true
+var _combat_lab := false
+var _lab_fixture := "cluster"
+var _lab_loadout := "chain"
+var _joy_unleash := false
+var _trigger_blocked := false
+var _lab_live := false
 
 var run_seed_text := "VOID-0001"
 var run_seed: int = 1
@@ -48,6 +57,11 @@ var upgrades: Dictionary = {}
 var current_offer: Array[Dictionary] = []
 var run_ended: bool = false
 var boss_spawned: bool = false
+var total_xp_collected: int = 0
+var pickups_collected: int = 0
+var kills_by_type := {"bit": 0, "vector": 0, "sentry": 0, "boss": 0}
+var source_stats: Dictionary = {}
+var debug_boss_skip := false
 
 var _touch_move := Vector2.ZERO
 var _touch_aim := Vector2.RIGHT
@@ -59,6 +73,8 @@ var _smoke_timer := 0.0
 var _capture_test := false
 var _capture_done := false
 var _capture_end_screen := false
+var _capture_viewport_size := Vector2i.ZERO
+var _capture_scorecard_page := 0
 var _smoke_finishing := false
 var _camera_tween: Tween
 
@@ -70,7 +86,9 @@ func _ready() -> void:
 	_build_world()
 	_connect_runtime()
 	_update_hud(true)
-	hud.flash_log("BOOT COMPLETE // MOVE: WASD OR TOUCH // VENT: SPACE", CYAN)
+	if _combat_lab:
+		_reset_lab()
+	hud.flash_log("GRAVITON KIT // HOLD M1: GATHER + LOAD // RELEASE: SALVO // SHIFT/SPACE: ESCAPE" if _combo_mode else "BOOT COMPLETE // MOVE: WASD OR TOUCH // VENT: SPACE", CYAN)
 	if _capture_end_screen:
 		_start_end_screen_capture()
 	elif _smoke_test:
@@ -92,6 +110,10 @@ func _build_world() -> void:
 	player.name = "Courier"
 	player.global_position = Vector2.ZERO
 	player.arena_bounds = ARENA_BOUNDS
+	player.combo_mode = _combo_mode
+	if _combo_mode:
+		player.name = "Graviton"
+		player.heat_cooling_per_second = 22.0
 	world_root.add_child(player)
 
 	camera = Camera2D.new()
@@ -113,10 +135,15 @@ func _build_world() -> void:
 	synth_audio = SynthAudioScript.new()
 	synth_audio.name = "SynthAudio"
 	add_child(synth_audio)
+	if _combo_mode:
+		graviton = GravitonSalvoScript.new()
+		world_root.add_child(graviton)
+		graviton.setup(player)
 
 	hud = TerminalHUDScript.new()
 	hud.name = "TerminalHUD"
 	add_child(hud)
+	hud.set_combo_mode(_combo_mode, _combat_lab)
 	if _using_touch or OS.has_feature("mobile") or OS.get_cmdline_user_args().has("--touch-ui"):
 		hud.set_touch_controls_visible(true)
 
@@ -131,24 +158,43 @@ func _connect_runtime() -> void:
 	weapon_controller.vent_pulse_requested.connect(_apply_vent_pulse)
 	weapon_controller.combat_log.connect(hud.flash_log)
 	weapon_controller.sfx_requested.connect(synth_audio.play_cue)
+	weapon_controller.attack_fired.connect(_record_attack)
 	hud.upgrade_selected.connect(_on_upgrade_selected)
 	hud.restart_requested.connect(_restart_run)
 	hud.touch_move_changed.connect(_on_touch_move)
 	hud.touch_vent_pressed.connect(_try_vent)
 	hud.touch_target_bias.connect(_on_touch_target_bias)
+	hud.unleash_started.connect(_begin_unleash)
+	hud.unleash_released.connect(_release_unleash)
+	hud.combat_cancel_requested.connect(_cancel_active_input)
+	hud.lab_fixture_requested.connect(_select_fixture)
+	hud.lab_loadout_requested.connect(_select_loadout)
+	hud.lab_reset_requested.connect(_reset_lab)
+	hud.lab_report_requested.connect(func(): _end_run(false))
+	if is_instance_valid(graviton):
+		graviton.attack_fired.connect(_record_attack)
+		graviton.sfx_requested.connect(synth_audio.play_cue)
+		graviton.impact.connect(func(_position: Vector2, _radius: float): _shake_camera(2.0, 0.08))
 
 
 func _physics_process(delta: float) -> void:
 	if run_ended:
 		return
 	_update_input_intents()
+	_poll_controller_unleash()
+	if _combat_lab and not _lab_live:
+		_update_hud()
+		return
 	elapsed_time += delta
 	spawn_timer -= delta
-	if not boss_spawned and elapsed_time >= BOSS_SPAWN_TIME:
+	if not _combat_lab and not boss_spawned and elapsed_time >= BOSS_SPAWN_TIME:
 		_spawn_boss()
-	if spawn_timer <= 0.0:
+	if not _combat_lab and spawn_timer <= 0.0:
 		_spawn_wave_tick()
 	var enemies: Array[Node] = get_tree().get_nodes_in_group("enemies")
+	if is_instance_valid(graviton):
+		graviton.tick(delta, enemies)
+		synth_audio.set_charge(graviton.is_charging, graviton.charge_ratio)
 	weapon_controller.tick(delta, player, enemies)
 	if is_instance_valid(boss) and player.global_position.distance_to(boss.global_position) < boss.collision_radius + 15.0:
 		player.take_damage(boss.contact_damage, boss.global_position)
@@ -161,28 +207,115 @@ func _physics_process(delta: float) -> void:
 		_tick_smoke_test(delta)
 
 
+func _input(event: InputEvent) -> void:
+	# Defensive aliases take precedence over a previously focused lab picker.
+	if _combo_mode and not run_ended and not get_tree().paused:
+		if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode in [KEY_SHIFT, KEY_SPACE]:
+			_try_vent()
+			get_viewport().set_input_as_handled()
+		elif event is InputEventJoypadButton and event.pressed and event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
+			_try_vent()
+			get_viewport().set_input_as_handled()
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if run_ended or get_tree().paused:
+		return
+	if _combo_mode and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_begin_unleash()
+		else:
+			_release_unleash()
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
+		if _combat_lab:
+			match event.physical_keycode:
+				KEY_F1: _select_fixture("cluster")
+				KEY_F2: _select_fixture("dispersed")
+				KEY_F3: _select_fixture("boss")
+				KEY_F4: _select_loadout("salvo")
+				KEY_F5: _select_loadout("gravity")
+				KEY_F6: _select_loadout("chain")
+				KEY_F7: _end_run(false)
+				KEY_R: _reset_lab()
 		match event.physical_keycode:
 			KEY_SPACE:
 				_try_vent()
+			KEY_SHIFT:
+				if _combo_mode:
+					_try_vent()
 			KEY_T:
 				_using_touch = not _using_touch
 				hud.set_touch_controls_visible(_using_touch)
 				hud.flash_log("TOUCH LAYER %s" % ("ONLINE" if _using_touch else "OFFLINE"), AMBER)
 			KEY_F10:
 				if not boss_spawned:
+					debug_boss_skip = true
 					elapsed_time = BOSS_SPAWN_TIME - 0.1
 					hud.flash_log("DEBUG // FAST-FORWARD TO WATCHDOG", MAGENTA)
 			KEY_ESCAPE, KEY_P:
 				hud.toggle_pause()
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+	if not _combo_mode and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 		_try_vent()
 	if event is InputEventJoypadButton and event.pressed:
 		if event.button_index == JOY_BUTTON_A or event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
 			_try_vent()
 		elif event.button_index == JOY_BUTTON_START:
 			hud.toggle_pause()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and is_instance_valid(graviton):
+		_cancel_active_input()
+		if is_instance_valid(hud):
+			hud.clear_combat_gesture()
+
+
+func _begin_unleash() -> void:
+	if not _combo_mode or run_ended or get_tree().paused:
+		return
+	_update_input_intents()
+	if graviton.begin_charge():
+		if _combat_lab and not _lab_live:
+			_lab_live = true
+			for enemy in get_tree().get_nodes_in_group("enemy_normal"):
+				enemy.simulation_enabled = true
+			if is_instance_valid(boss):
+				boss.set_physics_process(true)
+		synth_audio.set_charge(true, 0)
+
+
+func _release_unleash() -> void:
+	if _combo_mode and not run_ended and not get_tree().paused:
+		graviton.release_charge()
+		synth_audio.set_charge(false)
+
+
+func _cancel_active_input() -> void:
+	_trigger_blocked = true
+	if is_instance_valid(graviton):
+		graviton.cancel_charge()
+		graviton.abort_pending()
+	if is_instance_valid(synth_audio):
+		synth_audio.set_charge(false)
+
+
+func _poll_controller_unleash() -> void:
+	if not _combo_mode:
+		return
+	var devices := Input.get_connected_joypads()
+	if devices.is_empty():
+		return
+	var value := Input.get_joy_axis(devices[0], JOY_AXIS_TRIGGER_RIGHT)
+	if value < 0.2:
+		if _joy_unleash:
+			_release_unleash()
+		_joy_unleash = false
+		_trigger_blocked = false
+	elif value > 0.55 and not _joy_unleash and not _trigger_blocked:
+		_joy_unleash = true
+		_begin_unleash()
 
 
 func _update_input_intents() -> void:
@@ -227,6 +360,81 @@ func _update_input_intents() -> void:
 			aim_direction = mouse_offset.normalized()
 			aim_active = true
 	player.set_aim_bias(aim_direction, aim_active)
+
+
+func _select_fixture(value: String) -> void:
+	if value in ["cluster", "dispersed", "boss"]:
+		_lab_fixture = value
+		_reset_lab()
+
+
+func _select_loadout(value: String) -> void:
+	if value in ["salvo", "gravity", "chain"]:
+		_lab_loadout = value
+		_reset_lab()
+
+
+func _reset_lab() -> void:
+	if not _combat_lab:
+		return
+	_cancel_active_input()
+	for child in world_root.get_children():
+		if child != player and child != graviton:
+			child.queue_free()
+	boss = null
+	boss_spawned = false
+	run_ended = false
+	_lab_live = false
+	elapsed_time = 0
+	kills = 0
+	damage_dealt = 0
+	source_stats.clear()
+	total_xp_collected = 0
+	pickups_collected = 0
+	xp = 0
+	level = 1
+	for key in kills_by_type:
+		kills_by_type[key] = 0
+	for key in player.run_stats:
+		player.run_stats[key] = 0
+	player.global_position = Vector2.ZERO
+	player.velocity = Vector2.ZERO
+	player.hull = player.max_hull
+	player.shield = player.max_shield
+	player.heat = 0
+	player.is_dead = false
+	player.phase_cooldown = 0
+	player.phase_uses = 0
+	player.phase_distance = 0
+	player._invulnerable_left = 0.3
+	graviton.reset()
+	graviton.gravity_enabled = _lab_loadout != "salvo"
+	upgrades = {"FORK_ON_KILL": 2, "RETURN_VECTOR": 1, "ARC_FANOUT": 1, "CONDUCTIVE_MARK": 1, "DRIVER_RAIL": 1} if _lab_loadout == "chain" else {}
+	weapon_controller.enabled = true
+	weapon_controller.set_upgrades(upgrades)
+	weapon_controller._mass_cooldown = 0.18
+	weapon_controller._arc_cooldown = 0.7
+	weapon_controller._marked_enemy = null
+	for index in range(12 if _lab_fixture == "cluster" else 8):
+		var position := Vector2(320 + (index % 4 - 1.5) * 64, (index / 4 - 1) * 72)
+		if _lab_fixture != "cluster":
+			position = Vector2.RIGHT.rotated(float(index) * TAU / 8.0) * 380
+		var enemy: Enemy = EnemyScript.new()
+		var kind: StringName = &"bit" if _lab_fixture == "cluster" else (&"sentry" if index % 2 == 0 else &"vector")
+		enemy.configure(kind, position, {"health": 125.0, "speed": 30.0 if _lab_fixture == "cluster" else 65.0, "xp": 2, "simulation_enabled": false}, player)
+		world_root.add_child(enemy)
+		enemy.add_to_group("enemy_normal")
+		enemy.died.connect(_on_enemy_died)
+		enemy.damaged.connect(_record_enemy_damage)
+		enemy.contact_hit.connect(_on_enemy_contact)
+		enemy.shot_requested.connect(_on_enemy_shot_requested)
+	if _lab_fixture == "boss":
+		_spawn_boss()
+		boss.set_physics_process(false)
+	camera.reset_smoothing()
+	hud.set_lab_selection(_lab_fixture, _lab_loadout)
+	_update_hud(true)
+	hud.flash_log("LAB READY // AIM THEN HOLD M1 // R: RESET // F1-F3: ENCOUNTER // F4-F6: LOADOUT", CYAN)
 
 
 func _spawn_wave_tick() -> void:
@@ -281,6 +489,7 @@ func _spawn_enemy() -> void:
 	world_root.add_child(enemy)
 	enemy.add_to_group("enemy_normal")
 	enemy.died.connect(_on_enemy_died)
+	enemy.damaged.connect(_record_enemy_damage)
 	enemy.contact_hit.connect(_on_enemy_contact)
 	enemy.shot_requested.connect(_on_enemy_shot_requested)
 	spawn_index += 1
@@ -289,6 +498,8 @@ func _spawn_enemy() -> void:
 func _spawn_projectile(origin: Vector2, direction: Vector2, stats: Dictionary, team: StringName = &"player") -> Projectile:
 	var projectile: Projectile = ProjectileScript.new()
 	projectile.configure(origin, direction, stats, team)
+	if team == &"player":
+		_record_attack(projectile.source_id)
 	projectile.projectile_hit.connect(_on_projectile_hit)
 	projectile.expired.connect(_on_projectile_expired)
 	world_root.call_deferred("add_child", projectile)
@@ -306,9 +517,8 @@ func _on_boss_shot_requested(origin: Vector2, direction: Vector2, stats: Diction
 	_spawn_projectile(origin, direction, stats, &"enemy")
 
 
-func _on_projectile_hit(projectile: Area2D, target: Node, damage: float, hit_position: Vector2) -> void:
+func _on_projectile_hit(projectile: Area2D, target: Node, _damage: float, hit_position: Vector2) -> void:
 	if projectile is Projectile and projectile.team == &"player":
-		damage_dealt += damage
 		weapon_controller.on_projectile_hit(projectile, target, hit_position, get_tree().get_nodes_in_group("enemies"))
 
 
@@ -322,8 +532,12 @@ func _on_enemy_contact(enemy: Area2D, target: Node, amount: float) -> void:
 		player.take_damage(amount, enemy.global_position)
 
 
-func _on_enemy_died(_enemy: Area2D, orb_value: int, death_position: Vector2, _source_id: StringName) -> void:
+func _on_enemy_died(enemy: Area2D, orb_value: int, death_position: Vector2, source_id: StringName) -> void:
+	if run_ended:
+		return
 	kills += 1
+	kills_by_type[String(enemy.enemy_type)] += 1
+	_source_entry(source_id)["kills"] += 1
 	call_deferred("_spawn_xp", death_position, orb_value)
 
 
@@ -336,8 +550,12 @@ func _spawn_xp(position: Vector2, value: int) -> void:
 
 
 func _on_xp_collected(_orb: Area2D, value: int, _collector: Node) -> void:
+	total_xp_collected += value
+	pickups_collected += 1
 	xp += value
 	if _smoke_test:
+		return
+	if _combat_lab:
 		return
 	while xp >= xp_needed:
 		xp -= xp_needed
@@ -363,7 +581,7 @@ func _open_next_upgrade() -> void:
 func _get_upgrade_offer(level_index: int) -> Array[Dictionary]:
 	var scripted_ids: Array[String] = []
 	if level_index == 2:
-		scripted_ids = ["FORK_ON_KILL", "ARC_FANOUT", "VENT_AMPLIFIER"]
+		scripted_ids = ["FORK_ON_KILL", "ARC_FANOUT", "SHIELD_CAPACITOR" if _combo_mode else "VENT_AMPLIFIER"]
 	elif level_index == 3:
 		scripted_ids = ["RETURN_VECTOR", "CONDUCTIVE_MARK", "OVERCLOCK_KERNEL"]
 	if not scripted_ids.is_empty():
@@ -375,8 +593,20 @@ func _get_upgrade_offer(level_index: int) -> Array[Dictionary]:
 				definition["current_rank"] = current_rank
 				definition["next_rank"] = current_rank + 1
 				scripted.append(definition)
-		return scripted
-	return UpgradeCatalogScript.get_offer(run_seed_text, level_index, upgrades)
+		return _mode_choices(scripted)
+	var offer_state := upgrades.duplicate()
+	if _combo_mode:
+		for id in ["VENT_AMPLIFIER", "VENT_COOLANT", "GROUND_LOOP"]:
+			offer_state[id] = int(UpgradeCatalogScript.get_definition(id).get("max_rank", 3))
+	return _mode_choices(UpgradeCatalogScript.get_offer(run_seed_text, level_index, offer_state))
+
+
+func _mode_choices(choices: Array[Dictionary]) -> Array[Dictionary]:
+	if _combo_mode:
+		for choice in choices:
+			if choice["id"] == "OVERCLOCK_KERNEL":
+				choice["description"] = "Automatic processes execute faster and generate more heat. Graviton and salvo retain their own cadence."
+	return choices
 
 
 func _on_upgrade_selected(index: int) -> void:
@@ -397,11 +627,27 @@ func _on_upgrade_selected(index: int) -> void:
 
 
 func _try_vent() -> void:
+	if _combo_mode:
+		if run_ended or get_tree().paused:
+			return
+		_update_input_intents()
+		var departure := player.global_position
+		if player.try_phase_skip():
+			if graviton.is_charging:
+				graviton.cancel_charge()
+			synth_audio.set_charge(false)
+			synth_audio.play_cue(&"phase")
+			_show_ring(departure, 35, CYAN, 0.25)
+			_show_ring(player.global_position, 40, CYAN, 0.25)
+			_show_arc(PackedVector2Array([departure, player.global_position]), CYAN)
+			_trigger_blocked = true
+		return
 	if is_instance_valid(player) and player.try_vent():
 		hud.flash_log("VENT // REACTOR PURGED", AMBER)
 
 
 func _on_player_vented(position: Vector2, heat_ratio: float) -> void:
+	_record_attack(&"VENT")
 	weapon_controller.on_vent(position, heat_ratio)
 
 
@@ -451,6 +697,7 @@ func _spawn_boss() -> void:
 	boss.configure(player, 1.0)
 	world_root.add_child(boss)
 	boss.died.connect(_on_boss_died)
+	boss.damaged.connect(_record_enemy_damage)
 	boss.shot_requested.connect(_on_boss_shot_requested)
 	boss.phase_changed.connect(_on_boss_phase_changed)
 	hud.flash_log("ROOT PROCESS DETECTED // WATCHDOG_01", MAGENTA)
@@ -463,8 +710,10 @@ func _on_boss_phase_changed(phase: int) -> void:
 	hud.flash_log("WATCHDOG // PHASE %d" % phase, MAGENTA)
 
 
-func _on_boss_died(_boss_node: Node, _xp_value: int, _source_id: String) -> void:
+func _on_boss_died(_boss_node: Node, _xp_value: int, source_id: String) -> void:
 	kills += 1
+	kills_by_type["boss"] += 1
+	_source_entry(StringName(source_id))["kills"] += 1
 	_end_run(true)
 
 
@@ -474,24 +723,138 @@ func _end_run(victory: bool) -> void:
 	run_ended = true
 	synth_audio.play_cue(&"victory" if victory else &"death")
 	weapon_controller.enabled = false
+	if is_instance_valid(graviton):
+		graviton.stop()
+		synth_audio.set_charge(false)
 	player.set_move_intent(Vector2.ZERO)
-	var build_parts := PackedStringArray()
+	_update_hud(true)
+	hud.show_end_screen(victory, _build_run_report(victory))
+
+
+func _source_entry(source_id: StringName) -> Dictionary:
+	var key := String(source_id)
+	if not source_stats.has(key):
+		source_stats[key] = {"attacks": 0, "hits": 0, "kills": 0, "damage": 0.0}
+	return source_stats[key]
+
+
+func _record_attack(source_id: StringName) -> void:
+	if not run_ended:
+		_source_entry(source_id)["attacks"] += 1
+
+
+func _record_enemy_damage(_enemy: Area2D, amount: float, source_id: StringName, _position: Vector2) -> void:
+	if run_ended:
+		return
+	# Enemy actors report health actually removed, including the killing hit.
+	# ARC and VENT use the same path as projectiles; overkill is excluded.
+	damage_dealt += amount
+	var entry := _source_entry(source_id)
+	entry["damage"] += amount
+	entry["hits"] += 1
+
+
+func _build_run_report(victory: bool) -> Dictionary:
+	var duration := maxf(elapsed_time, 0.001)
+	var ship: Dictionary = player.run_stats
+	var damage_taken := float(ship["hull_damage"]) + float(ship["shield_absorbed"])
+	var patch_ranks := 0
+	var build_lines := PackedStringArray()
+	var patch_cards: Array[Dictionary] = []
 	var ids := upgrades.keys()
 	ids.sort()
 	for upgrade_id in ids:
-		build_parts.append("%s.R%d" % [upgrade_id, int(upgrades[upgrade_id])])
-	hud.show_end_screen(victory, {
-		"time": elapsed_time,
-		"kills": kills,
-		"level": level,
-		"damage": int(damage_dealt),
-		"seed": run_seed_text,
-		"build": " / ".join(build_parts) if not build_parts.is_empty() else "BASELINE",
-	})
+		var rank := int(upgrades[upgrade_id])
+		patch_ranks += rank
+		var definition: Dictionary = UpgradeCatalogScript.get_definition(StringName(upgrade_id))
+		build_lines.append("%s.R%d / %d" % [upgrade_id, rank, int(definition.get("max_rank", rank))])
+		patch_cards.append({"id": upgrade_id, "rank": rank, "max_rank": int(definition.get("max_rank", rank)), "target": definition.get("target", "SYSTEM")})
+	var sections: Array[Dictionary] = []
+	sections.append({"title": "RUN SUMMARY", "rows": {
+		"Result": "TRANSMISSION COMPLETE" if victory else "PROCESS TERMINATED",
+		"Survived": hud.format_duration(elapsed_time), "Kills / level": "%d / %d" % [kills, level],
+		"Damage / DPS": "%.1f / %.1f" % [damage_dealt, damage_dealt / duration],
+		"Seed": run_seed_text,
+		"Sector": "STATIC_PROOF", "Boss": "DEFEATED" if victory else ("ACTIVE / PHASE %d" % boss.phase if is_instance_valid(boss) else ("NOT DEFEATED" if boss_spawned else "NOT REACHED")),
+		"Run mode": ("LAB / %s / %s" % [_lab_fixture.to_upper(), _lab_loadout.to_upper()]) if _combat_lab else ("GRAVITON KIT" if _combo_mode else ("DEBUG / BOSS SKIP" if debug_boss_skip else "STANDARD")),
+		"Level": level, "XP collected": total_xp_collected, "XP toward next level": "%d / %d" % [xp, xp_needed],
+		"Pickups collected": pickups_collected, "Patches installed": "%d types / %d ranks" % [upgrades.size(), patch_ranks],
+	}})
+	sections.append({"title": "COMBAT", "rows": {
+		"Total kills": kills, "Kills per minute": "%.1f" % (kills * 60.0 / duration),
+		"BIT / VECTOR / SENTRY": "%d / %d / %d" % [kills_by_type["bit"], kills_by_type["vector"], kills_by_type["sentry"]],
+		"Boss kills": kills_by_type["boss"], "Damage dealt": "%.1f" % damage_dealt,
+		"Average DPS": "%.1f" % (damage_dealt / duration),
+		"Damage taken": "%.1f" % damage_taken, "Hits taken": ship["hits_taken"],
+		"Hull damage / shield absorbed": "%.1f / %.1f" % [ship["hull_damage"], ship["shield_absorbed"]],
+	}})
+	sections.append({"title": "SHIP / FINAL CONFIGURATION", "rows": {
+		"Hull": "%.1f / %.1f" % [player.hull, player.max_hull],
+		"Shield": "%.1f / %.1f" % [player.shield, player.max_shield],
+		"Hull repaired": "%.1f" % ship["hull_repaired"], "Shield restored": "%.1f" % ship["shield_restored"],
+		"Move speed": "%.0f units/s" % player.move_speed, "Distance traveled": "%.0f units" % ship["distance"],
+		"Shield recharge": "%.1f/s after %.2fs" % [player.shield_regen_rate, maxf(0.8, player.shield_regen_delay - 0.35 * int(upgrades.get("SHIELD_REBOOT", 0)))],
+		"Hit protection": "%.2fs" % (player.collision_grace + 0.12 * int(upgrades.get("KINETIC_DAMPERS", 0))),
+	}})
+	sections.append({"title": "REACTOR / VENT", "rows": {
+		"Final / peak heat": "%.1f / %.1f (cap %.0f)" % [player.heat, ship["peak_heat"], player.max_heat],
+		"Heat generated / vented": "%.1f / %.1f" % [ship["heat_generated"], ship["heat_vented"]],
+		"Cooling": "%.1f heat/s" % player.heat_cooling_per_second,
+		"Time heat-throttled": "%.1fs" % ship["throttled_seconds"],
+		"VENT uses / high-heat vents": "%d / %d" % [ship["vents"], ship["hot_vents"]],
+		"VENT cooldown": "%.2fs" % maxf(1.7, player.vent_base_cooldown - 0.45 * int(upgrades.get("VENT_COOLANT", 0))),
+	}})
+	var sources := ["MASS_DRIVER", "MASS_DRIVER_FORK", "MASS_DRIVER_RETURN", "ARC_EXE", "VENT"]
+	for source_id in source_stats:
+		if not sources.has(source_id):
+			sources.append(source_id)
+	for source_id in sources:
+		var entry := _source_entry(StringName(source_id))
+		var damage := float(entry["damage"])
+		var rows := {
+			"Activations" if source_id in ["ARC_EXE", "VENT"] else "Projectiles fired": entry["attacks"],
+			"Hits / kills": "%d / %d" % [entry["hits"], entry["kills"]],
+			"Damage / share": "%.1f / %.1f%%" % [damage, damage * 100.0 / maxf(damage_dealt, 0.001)],
+			"Average DPS (whole run)": "%.1f" % (damage / duration),
+		}
+		if source_id == "MASS_DRIVER":
+			rows["Round damage / target capacity"] = "24 / %d" % (2 + int(upgrades.get("DRIVER_RAIL", 0)))
+			rows["Fire interval (before heat)"] = "%.3fs" % (0.72 / (1.0 + 0.1 * int(upgrades.get("OVERCLOCK_KERNEL", 0))))
+		elif source_id == "ARC_EXE":
+			rows["Initial damage / chain falloff"] = "13 / 10% per jump"
+			rows["Branches / targets per chain"] = "%d / %d" % [1 + int(upgrades.get("ARC_FANOUT", 0)), 3 + int(upgrades.get("CONDUCTIVE_MARK", 0))]
+			rows["Cast interval (before heat)"] = "%.3fs" % (1.18 / (1.0 + 0.1 * int(upgrades.get("OVERCLOCK_KERNEL", 0))))
+		sections.append({"title": source_id.replace("ARC_EXE", "ARC.EXE"), "rows": rows})
+	sections.append({"title": "INSTALLED PATCHES / RANKS", "rows": {
+		"Build": "\n".join(build_lines) if not build_lines.is_empty() else "BASELINE / NO PATCHES",
+	}})
+	var combo: Dictionary = graviton.run_stats.duplicate(true) if is_instance_valid(graviton) else {}
+	if _combo_mode:
+		combo["phase_uses"] = player.phase_uses
+		combo["phase_distance"] = player.phase_distance
+		sections.append({"title": "GRAVITON / SALVO KIT", "rows": combo})
+	return {"sections": sections, "scorecard": {
+		"time": elapsed_time, "kills": kills, "level": level,
+		"damage": damage_dealt, "dps": damage_dealt / duration,
+		"kills_per_minute": kills * 60.0 / duration,
+		"seed": run_seed_text, "sector": "STATIC_PROOF",
+		"boss": sections[0]["rows"]["Boss"], "mode": sections[0]["rows"]["Run mode"],
+		"xp": total_xp_collected, "pickups": pickups_collected,
+		"level_xp": xp, "next_xp": xp_needed,
+		"enemies": kills_by_type.duplicate(true), "sources": source_stats.duplicate(true),
+		"patches": patch_cards, "patch_ranks": patch_ranks,
+		"hull": player.hull, "max_hull": player.max_hull,
+		"shield": player.shield, "max_shield": player.max_shield,
+		"heat": player.heat, "max_heat": player.max_heat, "ship": ship.duplicate(true),
+		"combo": combo, "chassis": "GRAVITON / 01" if _combo_mode else "COURIER / 01",
+	}}
 
 
 func _restart_run() -> void:
 	get_tree().paused = false
+	if _combat_lab:
+		_reset_lab()
+		return
 	get_tree().reload_current_scene()
 
 
@@ -546,7 +909,7 @@ func _update_hud(force: bool = false) -> void:
 	var state := player.get_status()
 	var threat := "ROOT" if boss_spawned else ("03" if elapsed_time >= 210.0 else ("02" if elapsed_time >= 100.0 else "01"))
 	var status := {
-		"process": "MASS_DRIVER+ARC.EXE",
+		"process": "GRAVITON/SALVO+ARC" if _combo_mode else "MASS_DRIVER+ARC.EXE",
 		"sector": "STATIC_PROOF",
 		"seed": run_seed_text,
 		"threat": threat,
@@ -563,6 +926,18 @@ func _update_hud(force: bool = false) -> void:
 		"vent_cooldown": state["vent_cooldown"],
 		"fps": Engine.get_frames_per_second(),
 	}
+	if _combo_mode:
+		status["phase_cooldown"] = player.phase_cooldown
+		status["rack_loaded"] = graviton.loaded_count if graviton.is_charging else 0
+		status["rack_affordable"] = mini(int(status["rack_loaded"]), maxi(0, floori((player.max_heat - player.heat) / 4.0)))
+		status["rack_charging"] = graviton.is_charging
+		status["rack_reload"] = graviton.reload_left
+		status["rack_ratio"] = graviton.charge_ratio
+		status["lab_live"] = _lab_live
+		status["gravity_enabled"] = graviton.gravity_enabled
+		status["field_active"] = is_instance_valid(graviton.field) and not graviton.field.expired
+	if _combat_lab:
+		status.erase("fps")
 	if force:
 		status["message"] = "SIGNAL LOCKED"
 	hud.set_status(status)
@@ -586,6 +961,15 @@ func _parse_command_line() -> void:
 			run_seed_text = argument.trim_prefix("--seed=").strip_edges().to_upper()
 		elif argument == "--touch-ui":
 			_using_touch = true
+		elif argument == "--classic":
+			_combo_mode = false
+		elif argument == "--combo-lab":
+			_combat_lab = true
+			_combo_mode = true
+		elif argument.begins_with("--fixture="):
+			_lab_fixture = argument.trim_prefix("--fixture=")
+		elif argument.begins_with("--loadout="):
+			_lab_loadout = argument.trim_prefix("--loadout=")
 		elif argument == "--smoke-test":
 			_smoke_test = true
 		elif argument == "--capture-test":
@@ -593,10 +977,22 @@ func _parse_command_line() -> void:
 			_capture_test = true
 		elif argument == "--capture-end-screen":
 			_capture_end_screen = true
+		elif argument.begins_with("--capture-size="):
+			var dimensions := argument.trim_prefix("--capture-size=").split("x")
+			if dimensions.size() == 2:
+				_capture_viewport_size = Vector2i(maxi(240, int(dimensions[0])), maxi(240, int(dimensions[1])))
+		elif argument.begins_with("--capture-page="):
+			_capture_scorecard_page = clampi(int(argument.trim_prefix("--capture-page=")), 0, 3)
 	if run_seed_text.is_empty():
 		run_seed_text = "VOID-0001"
 	if _capture_end_screen:
 		run_seed_text = END_SCREEN_CAPTURE_SEED
+	if _smoke_test or _capture_end_screen:
+		_combo_mode = false
+	if _lab_fixture not in ["cluster", "dispersed", "boss"]:
+		_lab_fixture = "cluster"
+	if _lab_loadout not in ["salvo", "gravity", "chain"]:
+		_lab_loadout = "chain"
 
 
 func _seed_roll(channel: String, index: int) -> int:
@@ -609,6 +1005,13 @@ func _start_end_screen_capture() -> void:
 	# intermittently capture only the dimmed background.
 	await get_tree().process_frame
 	await get_tree().process_frame
+
+	if _capture_viewport_size != Vector2i.ZERO:
+		get_window().content_scale_size = Vector2i.ZERO
+		get_window().size = _capture_viewport_size
+		await get_tree().process_frame
+		await get_tree().process_frame
+		hud._layout_end_screen()
 
 	# Keep this fixture independent of gameplay progress so visual diffs only
 	# reflect intentional end-screen changes.
@@ -628,7 +1031,35 @@ func _start_end_screen_capture() -> void:
 		"RETURN_VECTOR": 2,
 		"SHIELD_CAPACITOR": 3,
 		"VENT_AMPLIFIER": 3,
+		"VENT_COOLANT": 3,
+		"SHIELD_REBOOT": 3,
+		"KINETIC_DAMPERS": 2,
 	}
+	# Synthetic telemetry for the visual fixture only; real runs start at zero.
+	source_stats = {
+		"MASS_DRIVER": {"attacks": 1560, "hits": 3900, "kills": 480, "damage": 420000.0},
+		"MASS_DRIVER_FORK": {"attacks": 960, "hits": 710, "kills": 145, "damage": 100000.0},
+		"MASS_DRIVER_RETURN": {"attacks": 860, "hits": 1700, "kills": 180, "damage": 160000.0},
+		"ARC_EXE": {"attacks": 930, "hits": 5810, "kills": 403, "damage": 280000.0},
+		"VENT": {"attacks": 96, "hits": 212, "kills": 40, "damage": 27654.0},
+	}
+	kills_by_type = {"bit": 802, "vector": 293, "sentry": 153, "boss": 0}
+	total_xp_collected = 3310
+	pickups_collected = 1181
+	xp = 244
+	xp_needed = 305
+	for upgrade_id in upgrades:
+		for rank in range(1, int(upgrades[upgrade_id]) + 1):
+			player.apply_upgrade(upgrade_id, rank)
+	player.hull = 0.0
+	player.shield = 0.0
+	player.heat = 82.0
+	player.run_stats.merge({
+		"hits_taken": 49, "hull_damage": 189.0, "shield_absorbed": 618.0,
+		"hull_repaired": 35.0, "shield_restored": 552.0, "distance": 89000.0,
+		"heat_generated": 15088.0, "heat_vented": 5802.0, "peak_heat": 100.0,
+		"throttled_seconds": 67.8, "vents": 96, "hot_vents": 61,
+	}, true)
 	hud.set_status({
 		"process": "MASS_DRIVER+ARC.EXE",
 		"sector": "STATIC_PROOF",
@@ -649,16 +1080,18 @@ func _start_end_screen_capture() -> void:
 	})
 	# Reproduce the reported failure path exactly; victory uses the same layout.
 	_end_run(false)
+	hud._set_end_page(_capture_scorecard_page)
 
 	# show_end_screen() pauses the tree. This timer explicitly continues while
 	# paused, leaving enough rendered frames for layout and deferred focus.
 	await get_tree().create_timer(END_SCREEN_CAPTURE_SETTLE_SECONDS, true, false, true).timeout
 	# Synchronize with rendering, not only SceneTree processing. The tree is
 	# paused by the modal and a process-frame signal can precede the actual draw.
-	await RenderingServer.frame_post_draw
-	await RenderingServer.frame_post_draw
+	await _redraw_report_for_capture()
 
 	var capture_path := ProjectSettings.globalize_path(END_SCREEN_CAPTURE_PATH)
+	if _capture_scorecard_page > 0:
+		capture_path = capture_path.get_base_dir().path_join("end_screen_page_%d.png" % _capture_scorecard_page)
 	var capture_directory := capture_path.get_base_dir()
 	if not DirAccess.dir_exists_absolute(capture_directory):
 		var directory_error := DirAccess.make_dir_recursive_absolute(capture_directory)
@@ -679,6 +1112,15 @@ func _start_end_screen_capture() -> void:
 		_finish_end_screen_capture(false, capture_path, "save_error=%d" % save_error)
 		return
 	_finish_end_screen_capture(true, capture_path, "size=%dx%d" % [image.get_width(), image.get_height()])
+
+
+func _redraw_report_for_capture() -> void:
+	# Refresh cached GUI draws for hidden Windows GL windows before readback.
+	for frame in range(3):
+		hud._root.queue_redraw()
+		for control in hud._root.find_children("*", "Control", true, false):
+			control.queue_redraw()
+		await RenderingServer.frame_post_draw
 
 
 func _finish_end_screen_capture(success: bool, capture_path: String, detail: String) -> void:

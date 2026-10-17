@@ -14,6 +14,17 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-& $consoleGodot --headless --path $projectRoot --log-file smoke-ci.log -- --smoke-test --seed=AUTOMATED-TEST
+& $consoleGodot --headless --path $projectRoot --log-file (Join-Path $projectRoot '.godot\smoke-ci.log') -- --smoke-test --seed=AUTOMATED-TEST
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+
+& $consoleGodot --headless --path $projectRoot --log-file (Join-Path $projectRoot '.godot\run-report-test.log') --script res://tests/run_report_test.gd
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $consoleGodot --headless --path $projectRoot --log-file (Join-Path $projectRoot '.godot\graviton-test.log') --script res://tests/graviton_combo_test.gd
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $consoleGodot --headless --path $projectRoot --log-file (Join-Path $projectRoot '.godot\graviton-flow.log') --script res://tests/graviton_demo.gd
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $consoleGodot --headless --path $projectRoot --log-file (Join-Path $projectRoot '.godot\graviton-input.log') --script res://tests/graviton_input_test.gd
 exit $LASTEXITCODE
 

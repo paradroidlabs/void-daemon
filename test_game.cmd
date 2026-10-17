@@ -9,5 +9,13 @@ if not exist "%GODOT_EXE%" (
 )
 "%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --editor --quit
 if errorlevel 1 exit /b %errorlevel%
-"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file smoke-ci.log -- --smoke-test --seed=AUTOMATED-TEST
+"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\smoke-ci.log" -- --smoke-test --seed=AUTOMATED-TEST
+if errorlevel 1 exit /b %errorlevel%
+"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\run-report-test.log" --script res://tests/run_report_test.gd
+if errorlevel 1 exit /b %errorlevel%
+"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\graviton-test.log" --script res://tests/graviton_combo_test.gd
+if errorlevel 1 exit /b %errorlevel%
+"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\graviton-flow.log" --script res://tests/graviton_demo.gd
+if errorlevel 1 exit /b %errorlevel%
+"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\graviton-input.log" --script res://tests/graviton_input_test.gd
 exit /b %errorlevel%

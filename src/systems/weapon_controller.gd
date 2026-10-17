@@ -7,6 +7,7 @@ signal heat_generated(amount: float)
 signal vent_pulse_requested(position: Vector2, radius: float, damage: float, force: float)
 signal combat_log(message: String, color: Color)
 signal sfx_requested(cue: StringName)
+signal attack_fired(source_id: StringName)
 
 const CYAN := Color("68f7e5")
 const AMBER := Color("ffbd4a")
@@ -125,6 +126,7 @@ func _fire_arc(player: PlayerShip, enemies: Array[Node]) -> void:
 	var first := _select_arc_target(player, enemies)
 	if first == null:
 		return
+	attack_fired.emit(&"ARC_EXE")
 	var extra_jumps := _rank("CONDUCTIVE_MARK")
 	var branch_count := 1 + _rank("ARC_FANOUT")
 	var total_hits := 0

@@ -8,6 +8,7 @@ var enabled: bool = true
 var _streams: Dictionary = {}
 var _players: Array[AudioStreamPlayer] = []
 var _next_player: int = 0
+var _charge_player: AudioStreamPlayer
 
 
 func _ready() -> void:
@@ -18,6 +19,23 @@ func _ready() -> void:
 		player.bus = &"Master"
 		add_child(player)
 		_players.append(player)
+	_charge_player = AudioStreamPlayer.new()
+	_charge_player.volume_db = -25
+	var charge := _make_tone(135.0, 135.0, 0.5, 0.2, 0.06)
+	charge.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	charge.loop_end = charge.data.size() / 2
+	_charge_player.stream = charge
+	add_child(_charge_player)
+
+
+func set_charge(active: bool, ratio: float = 0.0) -> void:
+	if not is_instance_valid(_charge_player):
+		return
+	_charge_player.pitch_scale = lerpf(0.8, 1.9, clampf(ratio, 0, 1))
+	if active and enabled and not _charge_player.playing:
+		_charge_player.play()
+	elif not active:
+		_charge_player.stop()
 
 
 func play_cue(cue: StringName) -> void:
@@ -34,6 +52,9 @@ func play_cue(cue: StringName) -> void:
 
 func shutdown() -> void:
 	enabled = false
+	if is_instance_valid(_charge_player):
+		_charge_player.stop()
+		_charge_player.queue_free()
 	for voice in _players:
 		voice.stop()
 		voice.stream = null
@@ -51,6 +72,11 @@ func _build_streams() -> void:
 	_streams[&"boss"] = _make_sequence(PackedFloat32Array([220.0, 165.0, 110.0]), 0.17, 0.46)
 	_streams[&"victory"] = _make_sequence(PackedFloat32Array([294.0, 440.0, 587.0, 880.0]), 0.14, 0.38)
 	_streams[&"death"] = _make_tone(190.0, 42.0, 0.55, 0.46, 0.26)
+	_streams[&"gravity"] = _make_tone(260.0, 60.0, 0.30, 0.4, 0.12)
+	_streams[&"rack_load"] = _make_tone(540.0, 860.0, 0.045, 0.18, 0.02)
+	_streams[&"salvo"] = _make_noise_burst(0.12, 0.36, 180)
+	_streams[&"impact"] = _make_noise_burst(0.18, 0.35, 70)
+	_streams[&"phase"] = _make_tone(180.0, 1150.0, 0.17, 0.35, 0.05)
 
 
 func _make_tone(start_frequency: float, end_frequency: float, duration: float, amplitude: float, grit: float) -> AudioStreamWAV:

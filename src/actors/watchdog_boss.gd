@@ -4,6 +4,7 @@ extends Area2D
 signal died(boss: Node, xp_value: int, source_id: String)
 signal shot_requested(origin: Vector2, direction: Vector2, stats: Dictionary)
 signal phase_changed(phase: int)
+signal damaged(enemy: Area2D, amount: float, source_id: StringName, hit_position: Vector2)
 
 const MAGENTA := Color("ff4fd8")
 const RED := Color("ff496c")
@@ -83,7 +84,9 @@ func _physics_process(delta: float) -> void:
 func take_damage(amount: float, source_id: String = "", _hit_position: Vector2 = Vector2.ZERO) -> bool:
 	if is_dead or amount <= 0.0:
 		return false
-	health -= amount
+	var effective_damage := minf(health, amount)
+	health = maxf(0.0, health - amount)
+	damaged.emit(self, effective_damage, StringName(source_id), _hit_position)
 	_hit_flash = 0.08
 	var next_phase := 3 if health <= max_health * 0.34 else (2 if health <= max_health * 0.68 else 1)
 	if next_phase != phase:

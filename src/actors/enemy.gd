@@ -42,6 +42,7 @@ var damage: float = 7.0
 var xp_value: int = 1
 var speed: float = 72.0
 var velocity: Vector2 = Vector2.ZERO
+var _gravity_velocity := Vector2.ZERO
 var collision_radius: float = 9.0
 var contact_cooldown: float = 0.65
 var auto_free_on_death: bool = true
@@ -180,9 +181,14 @@ func _physics_process(delta: float) -> void:
 		_:
 			_tick_bit(has_target)
 
-	global_position += velocity * delta
+	global_position += (velocity + _gravity_velocity) * delta
+	_gravity_velocity = Vector2.ZERO
 	_emit_contact_hits()
 	queue_redraw()
+
+
+func set_gravity_velocity(value: Vector2) -> void:
+	_gravity_velocity = value.limit_length(290.0)
 
 
 func set_target(target_node: Node2D) -> void:
@@ -222,10 +228,11 @@ func take_damage(
 	if not _alive or amount <= 0.0:
 		return false
 
+	var effective_damage := minf(health, amount)
 	health = maxf(0.0, health - amount)
 	_flash_ticks = 4
 	var resolved_hit_position := hit_position if hit_position != Vector2.ZERO else global_position
-	damaged.emit(self, amount, source_id, resolved_hit_position)
+	damaged.emit(self, effective_damage, source_id, resolved_hit_position)
 	queue_redraw()
 	if health <= 0.0:
 		_die(source_id)
