@@ -11,6 +11,14 @@ if not exist "%GODOT_EXE%" (
 if errorlevel 1 exit /b %errorlevel%
 "%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\boss-health-bar-test.log" --script res://tests/boss_health_bar_test.gd
 if errorlevel 1 exit /b %errorlevel%
+"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\inertial-flight-test.log" --script res://tests/inertial_flight_test.gd
+if errorlevel 1 exit /b %errorlevel%
+"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\chassis-experience.log" --script res://tests/chassis_experience_test.gd
+if errorlevel 1 exit /b %errorlevel%
+"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\experience-audio.log" --script res://tests/experience_audio_test.gd
+if errorlevel 1 exit /b %errorlevel%
+"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\playfield-layout.log" --script res://tests/playfield_layout_test.gd
+if errorlevel 1 exit /b %errorlevel%
 "%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\smoke-ci.log" -- --smoke-test --seed=AUTOMATED-TEST
 if errorlevel 1 exit /b %errorlevel%
 "%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\run-report-test.log" --script res://tests/run_report_test.gd

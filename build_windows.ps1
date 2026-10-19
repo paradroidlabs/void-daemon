@@ -9,7 +9,10 @@ $templatePath = Join-Path $buildRoot '.tools\windows\windows_release_x86_64.exe'
 if (-not (Test-Path -LiteralPath $templatePath)) {
     throw 'Missing Windows runtime. Run python scripts/fetch_windows_template.py first.'
 }
-$outputDir = Join-Path $buildRoot 'builds\windows-desktop-2026.10.19.1'
+$projectText = Get-Content -LiteralPath (Join-Path $buildRoot 'project.godot') -Raw
+$buildVersion = [regex]::Match($projectText, 'config/version="([^"]+)"').Groups[1].Value
+if ($buildVersion -notmatch '^desktop-[0-9.]+$') { throw 'Invalid desktop build version.' }
+$outputDir = Join-Path $buildRoot ('builds\windows-' + $buildVersion)
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 $exePath = Join-Path $outputDir 'VOID-DAEMON.exe'
 & $GodotPath --headless --path $buildRoot --editor --quit --log-file (Join-Path $buildRoot '.godot\windows-import.log')
@@ -18,6 +21,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Godot resource import failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Windows export failed.' }
 if (-not (Test-Path -LiteralPath $exePath)) { throw 'Export did not produce an executable.' }
 Copy-Item -LiteralPath (Join-Path $buildRoot 'DESKTOP_PLAYTEST.md') -Destination $outputDir
+Copy-Item -LiteralPath (Join-Path $buildRoot 'EXPERIENCE_PLAYTEST.md') -Destination $outputDir
 Copy-Item -LiteralPath (Join-Path $buildRoot 'distribution\Play Combat Lab.cmd') -Destination $outputDir
 foreach ($license in @('GODOT-LICENSE.txt', 'GODOT-COPYRIGHT.txt')) {
     $licensePath = Join-Path $buildRoot ('.tools\windows\' + $license)
@@ -36,7 +40,7 @@ try {
     $hashAlgorithm.Dispose()
 }
 $manifest = [ordered]@{
-    build = 'desktop-2026.10.19.1'
+    build = $buildVersion
     source_commit = $revision
     source_has_tracked_changes = [bool]$status
     engine = '4.7.1.stable.official.a13da4feb'

@@ -43,6 +43,8 @@ var xp_value: int = 1
 var speed: float = 72.0
 var velocity: Vector2 = Vector2.ZERO
 var _gravity_velocity := Vector2.ZERO
+var navigation_fields: Array[Node2D] = []
+var _navigation_velocity := Vector2.ZERO
 var collision_radius: float = 9.0
 var contact_cooldown: float = 0.65
 var auto_free_on_death: bool = true
@@ -181,7 +183,15 @@ func _physics_process(delta: float) -> void:
 		_:
 			_tick_bit(has_target)
 
-	global_position += (velocity + _gravity_velocity) * delta
+	var navigation_force := Vector2.ZERO
+	for field in navigation_fields:
+		if is_instance_valid(field) and not field.is_queued_for_deletion():
+			navigation_force += Vector2(field.call("acceleration_at", global_position))
+	# Navigation wells accumulate drift independently of steering and the
+	# offensive Graviton field. Committed charges keep their readable lane.
+	var resistance := 0.16 if _state == STATE_CHARGE else 0.65
+	_navigation_velocity = (_navigation_velocity * exp(-0.8 * delta) + navigation_force * resistance * delta).limit_length(210)
+	global_position += (velocity + _gravity_velocity + _navigation_velocity) * delta
 	_gravity_velocity = Vector2.ZERO
 	_emit_contact_hits()
 	queue_redraw()
@@ -189,6 +199,10 @@ func _physics_process(delta: float) -> void:
 
 func set_gravity_velocity(value: Vector2) -> void:
 	_gravity_velocity = value.limit_length(290.0)
+
+
+func apply_impulse(value: Vector2) -> void:
+	_navigation_velocity = (_navigation_velocity + value).limit_length(210)
 
 
 func set_target(target_node: Node2D) -> void:

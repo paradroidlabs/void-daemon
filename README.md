@@ -1,10 +1,23 @@
 # VOID//DAEMON — playable Godot prototype
 
-![Graviton field and charged missile salvo](artifacts/graviton_salvo.png)
+![Four-chassis hangar](artifacts/hangar_experience.png)
 
 🎬 **[Watch Gameplay Trailer](artifacts/void_daemon_trailer.mp4)** — 30-second highlight reel featuring autonomous weapon processes, patch evolutions, thermal reactor venting, and swarm combat.
 
-This repository contains an executable combat proof. The current kit combines an offensive graviton field with a charged missile salvo, followed by automatic ARC and driver processes. Holding M1 gathers enemies and loads the rack; release launches the salvo. Shift/Space provides a separate phase escape.
+This repository contains an executable combat proof, not a finished game. The current experience checkpoint has four playable chassis, inertial thrust/coast/counter-thrust, environmental gravity, live flight instruments, an actual boot hangar, and reactive hive transmissions. Automatic ARC and driver processes remain alongside the manual chassis attack. Shield regenerates passively; Shift/Space activates the selected chassis maneuver.
+
+| Chassis | Hold / release M1 | Shift or Space |
+|---|---|---|
+| Graviton | Gather + load / missile salvo | Phase Skip |
+| Bastion | Sustained piercing beam / stop | Breach Step + local displacement |
+| Scrapper | Gravity clamp / collapse | Tow Step + short-lived decoy |
+| Redline | Heat-amplified close plasma / stop | Backtrace to a recent position, no resource rewind |
+
+See [Experience playtest](EXPERIENCE_PLAYTEST.md) for controls, initial tuning, evidence and remaining human gates. The hive uses current-run telemetry only. Speech uses an installed English system voice with subtitle fallback; this is a first procedural audio/narrative pass, not finished voice acting.
+
+Combat now has its own clipped viewport, with a thin status rail above and telemetry/hive feeds below—not panels over enemies. The default camera is wider (82%); mouse wheel, `+`/`−`, and touch-sized dock buttons adjust 65–125% zoom. Mouse aiming accounts for the viewport offset and zoom. The older Courier/Guard/Boost experiment is preserved separately on [`codex/courier-ui-checkpoint`](https://github.com/paradroidlabs/void-daemon/tree/codex/courier-ui-checkpoint); it has different controls, not missing Graviton features. Its floating module panel has also been moved out of combat; the diagram remains in pause inspection.
+
+![Bastion beam, reactive hive feed and flight instruments](artifacts/bastion_hive_experience.png)
 
 **Start the example:** `play_combo_lab.cmd` opens Cluster + Full Chain, with selectable encounters and loadouts. See [Graviton playtest instructions](PLAYTEST_GRAVITON.md). `play_classic.cmd` retains the previous automatic-weapon/VENT mode; a pre-change source archive is also preserved in `artifacts/`.
 
@@ -16,7 +29,7 @@ On a fresh clone, install Godot 4.7.1 and open `project.godot`; the portable eng
 
 For a standalone Windows executable and the full desktop test checklist, see [Desktop playtest](DESKTOP_PLAYTEST.md). Source branch: `prototype/graviton-salvo-checkpoint`. The default `master` branch is the older demo; it is not the current combat experiment.
 
-[Download the Windows desktop playtest](https://github.com/paradroidlabs/void-daemon/releases/tag/desktop-2026.10.19.1) — extract the ZIP, then open `VOID-DAEMON.exe` for survival or `Play Combat Lab.cmd` for the repeatable lab. No Godot installation is needed to play.
+[Download the Windows desktop playtest](https://github.com/paradroidlabs/void-daemon/releases/tag/desktop-2026.10.19.3) — extract the ZIP, then open `VOID-DAEMON.exe` for the hangar or `Play Combat Lab.cmd` for the repeatable Graviton lab. Choose any chassis in the hangar and open its lab. No Godot installation is needed to play.
 
 On Windows, the execution-policy-free launcher is:
 
@@ -54,11 +67,11 @@ You can also open `project.godot` in Godot and press **F6/F5**.
 
 ### Mouse and keyboard
 
-- `WASD` or arrow keys: move.
+- `WASD` or arrow keys: thrust; release to coast, counter-thrust to brake. Aim changes the nose, not existing momentum.
 - Mouse position: bias both weapon processes toward that direction.
-- Hold `M1`: graviton gathering field + charge up to six missiles; release to launch.
-- `Shift` or `Space`: phase skip, canceling an uncommitted charge. Shield regenerates passively.
-- In the lab, `F1–F3` choose encounters, `F4–F6` choose loadouts, `R` resets, and `F7` opens the scorecard. The selectors and Report button also work by mouse/touch.
+- Hold/release `M1`: selected chassis attack (table above).
+- `Shift` or `Space`: selected maneuver, canceling an active hold. Shield regenerates passively. M2 has no combat action.
+- In the lab, `F1–F3` choose encounters, `F8` chooses Orbit Field, `F4–F6` choose loadouts, `R` resets, and `F7` opens the scorecard. The selectors and Report button also work by mouse/touch.
 - Classic mode uses `Space` or right mouse for `VENT` instead of the Graviton kit.
 - `1`, `2`, `3` or mouse: choose an upgrade.
 - `T`: show/hide the touch layer for desktop testing.
@@ -68,15 +81,15 @@ You can also open `project.godot` in Godot and press **F6/F5**.
 
 - Left stick: move.
 - Right stick: bias fire.
-- Right trigger: hold/release Graviton + Salvo.
-- `A` or right shoulder: phase skip (`VENT` in classic mode).
+- Right trigger: hold/release the selected chassis attack.
+- `A` or right shoulder: chassis maneuver (`VENT` in classic mode).
 - Upgrade cards use normal controller focus and accept input.
 
 ### Mobile touch
 
 - Lower-left virtual stick: move.
-- Hold/drag the right action pad: gather and aim; release to launch the salvo.
-- Lower-right `PHASE SKIP`: escape. Slide from the held action pad into it to cancel first and escape without firing.
+- Hold/drag the right action pad: hold and aim the chassis attack; release to unleash or stop as appropriate.
+- Lower-right labeled maneuver: escape. Slide from the held action pad into it to cancel first and escape without an accidental release attack.
 - `II` pauses. Shield is passive. Classic mode retains right drag-to-bias and the `VENT` button.
 - Tap upgrade cards directly.
 

@@ -1,12 +1,12 @@
 # VOID//DAEMON — Windows desktop playtest
 
-Build: `desktop-2026.10.19.1`. The title bar identifies the build and mode.
+Build: `desktop-2026.10.19.3`. The title bar identifies the build and mode. See the included [experience checklist](EXPERIENCE_PLAYTEST.md) for the four chassis, inertial flight, hive and audio pass.
 
 ## Play without Godot
 
-Double-click `VOID-DAEMON.exe` for the full survival run: five minutes of escalating waves followed by WATCHDOG. All game resources are embedded; no editor, Python, account, or network connection is required to play. Keep the license notices with redistributed copies. This is an unsigned prototype, not an installer.
+Double-click `VOID-DAEMON.exe` for the hangar: select one of four chassis, then Deploy (five minutes of escalating waves followed by WATCHDOG) or Combat Lab. Sound/accessibility settings are on the hangar; pause or the final scorecard can return there. All game resources are embedded; no editor, Python, account, or network connection is required to play. Keep the license notices with redistributed copies. This is an unsigned prototype, not an installer.
 
-The **VOID DAEMON - Combat Lab** desktop shortcut opens the same executable with `-- --combo-lab --fixture=cluster --loadout=chain`. The **VOID DAEMON** shortcut starts the full run. Desktop shortcuts are local conveniences; their absolute paths are not portable between computers.
+The **VOID DAEMON - Combat Lab** desktop shortcut opens the same executable with `-- --combo-lab --fixture=cluster --loadout=chain`. The **VOID DAEMON** shortcut opens the hangar. Desktop shortcuts are local conveniences; their absolute paths are not portable between computers.
 
 The downloadable ZIP also includes `Play Combat Lab.cmd`; keep it beside the executable to open the lab on another desktop without creating a shortcut.
 
@@ -16,15 +16,16 @@ In a source checkout, `play_combo_lab.cmd` opens the lab and `run_game.cmd` open
 
 | Input | Action |
 |---|---|
-| WASD / arrows | Move |
+| WASD / arrows | Directional thrust; release to coast; counter-thrust to brake |
 | Mouse | Aim priority |
-| Hold M1 / release | Gather with gravity and load missiles / launch salvo |
-| Shift or Space | One shared Phase Skip action and cooldown |
+| Hold M1 / release | Selected chassis attack: salvo, beam, clamp/collapse or close plasma |
+| Shift or Space | Selected chassis maneuver; one shared action/cooldown, never shield |
 | Esc / P | Pause / resume |
 | 1 / 2 / 3 or click | Select an upgrade during survival |
 | T | Toggle touch preview |
 | Lab F1 / F2 / F3 | Cluster / Dispersed / Boss |
-| Lab F4 / F5 / F6 | Salvo Alone / Graviton + Salvo / Full Chain |
+| Lab F8 | Orbit Field flight/gravity fixture |
+| Lab F4 / F5 / F6 | Chassis diagnostic / base kit / patched chain; Graviton retains its original comparison |
 | Lab R | Reset the selected fixture |
 | Lab F7 / Report | Actual scorecard; restart preserves fixture/loadout |
 
@@ -32,7 +33,7 @@ Shield regenerates passively. M2/Q has no combat action in this kit; Q quits onl
 
 ## Hands-on pass
 
-1. In the lab, try tap, partial, and full charges, movement during attack, and phase cancellation. Compare the three fixtures and three loadouts. Automatic baseline processes remain in all comparison presets.
+1. In the lab, try each chassis, thrust/coast/counter-thrust, movement during attack, and maneuver cancellation. Compare encounters and loadouts. On new ships F4 isolates the manual attack; Graviton's original F4 retains its baseline automatic processes.
 2. Pause while holding, resume, change focus, reset, and open the report. Check that attacks do not stick and the scorecard remains readable without scrolling.
 3. Play survival from level 1. Choose upgrades, reach death or the boss, inspect the scorecard, and restart. Check that automatic upgrades still matter alongside the manual salvo.
 4. Note the build, fixture/loadout or seed, controls, what happened, and the one change you want. Check sound output, window resizing, and comfort on this actual desktop.
@@ -47,4 +48,4 @@ The rendered source lab opened on the user's AMD Radeon desktop; external mouse 
 
 ## Rebuild
 
-Install Godot 4.7.1 or use the ignored portable copy in `.tools/godot`. Run `python scripts/fetch_windows_template.py` to fetch the official matching Windows runtime into `.tools/windows` (HTTPS ranges and ZIP CRC checked). Also place the upstream engine LICENSE.txt and COPYRIGHT.txt there as `GODOT-LICENSE.txt` and `GODOT-COPYRIGHT.txt`. Run `build_windows.cmd`. The release preset embeds resources and excludes tests, screenshots, and development notes. Output and generated `build.json` are under ignored `builds/windows-desktop-2026.10.19.1`; the manifest records the source commit, dirty state, and executable SHA-256.
+Install Godot 4.7.1 or use the ignored portable copy in `.tools/godot`. Run `python scripts/fetch_windows_template.py` to fetch the official matching Windows runtime into `.tools/windows` (HTTPS ranges and ZIP CRC checked). Also place the upstream engine LICENSE.txt and COPYRIGHT.txt there as `GODOT-LICENSE.txt` and `GODOT-COPYRIGHT.txt`. Run `build_windows.cmd`. The release preset embeds resources and excludes tests, screenshots, development notes and old builds. Output and generated `build.json` are under ignored `builds/windows-desktop-2026.10.19.3`; the manifest records the source commit, dirty state, and executable SHA-256.

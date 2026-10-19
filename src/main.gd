@@ -11,6 +11,11 @@ const TerminalHUDScript := preload("res://src/ui/terminal_hud.gd")
 const ArenaBackdropScript := preload("res://src/world/arena_backdrop.gd")
 const SynthAudioScript := preload("res://src/audio/synth_audio.gd")
 const GravitonSalvoScript := preload("res://src/systems/graviton_salvo.gd")
+const GravityWellScript := preload("res://src/world/gravity_well.gd")
+const AlternateArsenalScript := preload("res://src/systems/alternate_arsenal.gd")
+const ChassisCatalogScript := preload("res://src/systems/chassis_catalog.gd")
+const TowDecoyScript := preload("res://src/actors/tow_decoy.gd")
+const HiveDirectorScript := preload("res://src/ui/hive_director.gd")
 
 const CYAN := Color("68f7e5")
 const GREEN := Color("73ff9f")
@@ -41,6 +46,11 @@ var _lab_loadout := "chain"
 var _joy_unleash := false
 var _trigger_blocked := false
 var _lab_live := false
+var _direct_flight := false
+var _chassis := "graviton"
+var hive: HiveDirector
+var _honor_command_line := true
+var combat_view: SubViewportContainer
 
 var run_seed_text := "VOID-0001"
 var run_seed: int = 1
@@ -81,15 +91,18 @@ var _camera_tween: Tween
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
-	_parse_command_line()
-	DisplayServer.window_set_title("VOID//DAEMON | %s | %s" % [ProjectSettings.get_setting("application/config/version", "prototype"), "COMBAT LAB" if _combat_lab else ("SURVIVAL" if _combo_mode else "CLASSIC")])
+	if _honor_command_line:
+		_parse_command_line()
+	get_window().title = "VOID//DAEMON | %s | %s" % [ProjectSettings.get_setting("application/config/version", "prototype"), "COMBAT LAB" if _combat_lab else ("SURVIVAL" if _combo_mode else "CLASSIC")]
 	run_seed = UpgradeCatalogScript.stable_hash(run_seed_text)
 	_build_world()
+	if not _combat_lab:
+		_setup_navigation_gravity()
 	_connect_runtime()
 	_update_hud(true)
 	if _combat_lab:
 		_reset_lab()
-	hud.flash_log("GRAVITON KIT // HOLD M1: GATHER + LOAD // RELEASE: SALVO // SHIFT/SPACE: ESCAPE" if _combo_mode else "BOOT COMPLETE // MOVE: WASD OR TOUCH // VENT: SPACE", CYAN)
+	hud.flash_log("%s KIT // M1: ATTACK // SHIFT/SPACE: %s" % [_chassis.to_upper(), ChassisCatalogScript.get_ship(_chassis)["maneuver"]] if _combo_mode else "BOOT COMPLETE // MOVE: WASD OR TOUCH // VENT: SPACE", CYAN)
 	if _capture_end_screen:
 		_start_end_screen_capture()
 	elif _smoke_test:
@@ -97,24 +110,29 @@ func _ready() -> void:
 
 
 func _build_world() -> void:
+	combat_view = preload("res://src/ui/combat_view.gd").new()
+	combat_view.lab = _combat_lab
+	combat_view.footer_height = 120 if _combo_mode else 64
+	add_child(combat_view)
 	backdrop = ArenaBackdropScript.new()
 	backdrop.name = "ArenaBackdrop"
 	backdrop.z_index = -100
 	backdrop.configure(ARENA_BOUNDS, run_seed)
-	add_child(backdrop)
+	combat_view.arena.add_child(backdrop)
 
 	world_root = Node2D.new()
 	world_root.name = "RuntimeWorld"
-	add_child(world_root)
+	combat_view.arena.add_child(world_root)
 
 	player = PlayerShipScript.new()
 	player.name = "Courier"
 	player.global_position = Vector2.ZERO
 	player.arena_bounds = ARENA_BOUNDS
 	player.combo_mode = _combo_mode
+	player.inertial_flight = _combo_mode and not _direct_flight
 	if _combo_mode:
-		player.name = "Graviton"
-		player.heat_cooling_per_second = 22.0
+		player.configure_chassis(_chassis)
+		player.name = ChassisCatalogScript.get_ship(_chassis)["name"]
 	world_root.add_child(player)
 
 	camera = Camera2D.new()
@@ -127,6 +145,7 @@ func _build_world() -> void:
 	camera.limit_bottom = int(ARENA_BOUNDS.end.y)
 	camera.enabled = true
 	player.add_child(camera)
+	combat_view.attach_camera(camera)
 
 	weapon_controller = WeaponControllerScript.new()
 	weapon_controller.name = "WeaponController"
@@ -137,7 +156,7 @@ func _build_world() -> void:
 	synth_audio.name = "SynthAudio"
 	add_child(synth_audio)
 	if _combo_mode:
-		graviton = GravitonSalvoScript.new()
+		graviton = GravitonSalvoScript.new() if _chassis == "graviton" else AlternateArsenalScript.new()
 		world_root.add_child(graviton)
 		graviton.setup(player)
 
@@ -145,11 +164,18 @@ func _build_world() -> void:
 	hud.name = "TerminalHUD"
 	add_child(hud)
 	hud.set_combo_mode(_combo_mode, _combat_lab)
+	if _combo_mode:
+		hud.set_chassis(_chassis)
 	if _using_touch or OS.has_feature("mobile") or OS.get_cmdline_user_args().has("--touch-ui"):
 		hud.set_touch_controls_visible(true)
+	if _combo_mode:
+		hive = HiveDirectorScript.new()
+		hive.game = self
+		add_child(hive)
 
 
 func _connect_runtime() -> void:
+	player.maneuver_used.connect(_on_maneuver_used)
 	player.vented.connect(_on_player_vented)
 	player.damaged.connect(_on_player_damaged)
 	player.died.connect(_on_player_died)
@@ -162,6 +188,14 @@ func _connect_runtime() -> void:
 	weapon_controller.attack_fired.connect(_record_attack)
 	hud.upgrade_selected.connect(_on_upgrade_selected)
 	hud.restart_requested.connect(_restart_run)
+	hud.menu_requested.connect(_return_to_menu)
+	hud.zoom_requested.connect(combat_view.adjust_zoom)
+	hud.pause_toggled.connect(func(paused: bool):
+		if paused:
+			synth_audio.stop_flight()
+		if paused and is_instance_valid(hive):
+			hive.silence()
+	)
 	hud.touch_move_changed.connect(_on_touch_move)
 	hud.touch_vent_pressed.connect(_try_vent)
 	hud.touch_target_bias.connect(_on_touch_target_bias)
@@ -183,6 +217,9 @@ func _physics_process(delta: float) -> void:
 		return
 	_update_input_intents()
 	_poll_controller_unleash()
+	if is_instance_valid(hive):
+		hive.observe(delta)
+	synth_audio.update_flight(player, _chassis, is_instance_valid(hive) and hive._visible_left > 0)
 	if _combat_lab and not _lab_live:
 		_update_hud()
 		return
@@ -195,7 +232,7 @@ func _physics_process(delta: float) -> void:
 	var enemies: Array[Node] = get_tree().get_nodes_in_group("enemies")
 	if is_instance_valid(graviton):
 		graviton.tick(delta, enemies)
-		synth_audio.set_charge(graviton.is_charging, graviton.charge_ratio)
+		synth_audio.set_charge(graviton.is_charging, graviton.charge_ratio, _chassis)
 	weapon_controller.tick(delta, player, enemies)
 	if is_instance_valid(boss) and player.global_position.distance_to(boss.global_position) < boss.collision_radius + 15.0:
 		player.take_damage(boss.contact_damage, boss.global_position)
@@ -222,7 +259,20 @@ func _input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if run_ended or get_tree().paused:
 		return
+	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		if combat_view.contains_screen_point(event.position):
+			combat_view.adjust_zoom(1 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1)
+			_update_hud()
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode in [KEY_EQUAL, KEY_PLUS, KEY_MINUS, KEY_KP_ADD, KEY_KP_SUBTRACT]:
+		combat_view.adjust_zoom(-1 if event.physical_keycode in [KEY_MINUS, KEY_KP_SUBTRACT] else 1)
+		_update_hud()
+		get_viewport().set_input_as_handled()
+		return
 	if _combo_mode and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed and not combat_view.contains_screen_point(event.position):
+			return
 		if event.pressed:
 			_begin_unleash()
 		else:
@@ -239,6 +289,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				KEY_F5: _select_loadout("gravity")
 				KEY_F6: _select_loadout("chain")
 				KEY_F7: _end_run(false)
+				KEY_F8: _select_fixture("orbit")
 				KEY_R: _reset_lab()
 		match event.physical_keycode:
 			KEY_SPACE:
@@ -284,7 +335,7 @@ func _begin_unleash() -> void:
 				enemy.simulation_enabled = true
 			if is_instance_valid(boss):
 				boss.set_physics_process(true)
-		synth_audio.set_charge(true, 0)
+		synth_audio.set_charge(true, 0, _chassis)
 
 
 func _release_unleash() -> void:
@@ -295,6 +346,10 @@ func _release_unleash() -> void:
 
 func _cancel_active_input() -> void:
 	_trigger_blocked = true
+	if is_instance_valid(hive):
+		hive.silence()
+	if is_instance_valid(synth_audio):
+		synth_audio.stop_flight()
 	if is_instance_valid(graviton):
 		graviton.cancel_charge()
 		graviton.abort_pending()
@@ -356,7 +411,7 @@ func _update_input_intents() -> void:
 		aim_direction = _touch_aim
 		aim_active = true
 	elif not _using_touch and not OS.has_feature("mobile") and not aim_active:
-		var mouse_offset := get_global_mouse_position() - player.global_position
+		var mouse_offset: Vector2 = combat_view.screen_to_world(get_viewport().get_mouse_position()) - player.global_position
 		if mouse_offset.length() > 52.0:
 			aim_direction = mouse_offset.normalized()
 			aim_active = true
@@ -364,7 +419,7 @@ func _update_input_intents() -> void:
 
 
 func _select_fixture(value: String) -> void:
-	if value in ["cluster", "dispersed", "boss"]:
+	if value in ["cluster", "dispersed", "boss", "orbit"]:
 		_lab_fixture = value
 		_reset_lab()
 
@@ -376,6 +431,8 @@ func _select_loadout(value: String) -> void:
 
 
 func _reset_lab() -> void:
+	if is_instance_valid(hive):
+		hive.reset()
 	if not _combat_lab:
 		return
 	_cancel_active_input()
@@ -400,6 +457,12 @@ func _reset_lab() -> void:
 		player.run_stats[key] = 0
 	player.global_position = Vector2.ZERO
 	player.velocity = Vector2.ZERO
+	player.rotation = 0
+	player.clear_flight_history()
+	player.flight_thrust = Vector2.ZERO
+	player.flight_gravity = Vector2.ZERO
+	for key in player.flight_stats:
+		player.flight_stats[key] = 0.0
 	player.hull = player.max_hull
 	player.shield = player.max_shield
 	player.heat = 0
@@ -408,10 +471,12 @@ func _reset_lab() -> void:
 	player.phase_uses = 0
 	player.phase_distance = 0
 	player._invulnerable_left = 0.3
+	_setup_navigation_gravity()
 	graviton.reset()
-	graviton.gravity_enabled = _lab_loadout != "salvo"
+	if _chassis == "graviton":
+		graviton.gravity_enabled = _lab_loadout != "salvo"
 	upgrades = {"FORK_ON_KILL": 2, "RETURN_VECTOR": 1, "ARC_FANOUT": 1, "CONDUCTIVE_MARK": 1, "DRIVER_RAIL": 1} if _lab_loadout == "chain" else {}
-	weapon_controller.enabled = true
+	weapon_controller.enabled = _chassis == "graviton" or _lab_loadout != "salvo"
 	weapon_controller.set_upgrades(upgrades)
 	weapon_controller._mass_cooldown = 0.18
 	weapon_controller._arc_cooldown = 0.7
@@ -424,6 +489,7 @@ func _reset_lab() -> void:
 		var kind: StringName = &"bit" if _lab_fixture == "cluster" else (&"sentry" if index % 2 == 0 else &"vector")
 		enemy.configure(kind, position, {"health": 125.0, "speed": 30.0 if _lab_fixture == "cluster" else 65.0, "xp": 2, "simulation_enabled": false}, player)
 		world_root.add_child(enemy)
+		enemy.navigation_fields = player.gravity_sources
 		enemy.add_to_group("enemy_normal")
 		enemy.died.connect(_on_enemy_died)
 		enemy.damaged.connect(_record_enemy_damage)
@@ -436,6 +502,21 @@ func _reset_lab() -> void:
 	hud.set_lab_selection(_lab_fixture, _lab_loadout)
 	_update_hud(true)
 	hud.flash_log("LAB READY // AIM THEN HOLD M1 // R: RESET // F1-F3: ENCOUNTER // F4-F6: LOADOUT", CYAN)
+
+
+func _setup_navigation_gravity() -> void:
+	player.gravity_sources.clear()
+	if not player.inertial_flight or (_combat_lab and _lab_fixture != "orbit"):
+		return
+	var centers: Array = [Vector2(320, 80)] if _combat_lab else [
+		Vector2(-740, -220 + _seed_roll("well", 0) % 140),
+		Vector2(740, 220 - _seed_roll("well", 1) % 140),
+	]
+	for center in centers:
+		var well := GravityWellScript.new()
+		well.position = center
+		world_root.add_child(well)
+		player.gravity_sources.append(well)
 
 
 func _spawn_wave_tick() -> void:
@@ -464,8 +545,7 @@ func _spawn_enemy() -> void:
 	var angle_roll := _seed_roll("spawn_angle", spawn_index)
 	var radius_roll := _seed_roll("spawn_radius", spawn_index)
 	var angle := TAU * float(angle_roll & 0xffff) / 65535.0
-	var radius := 520.0 + float(radius_roll & 0xff) / 255.0 * 180.0
-	var position := player.global_position + Vector2.RIGHT.rotated(angle) * radius
+	var position: Vector2 = combat_view.spawn_position(player.global_position, angle, float(radius_roll & 0xff) / 255.0, ARENA_BOUNDS)
 	position = Vector2(
 		clampf(position.x, ARENA_BOUNDS.position.x + 36.0, ARENA_BOUNDS.end.x - 36.0),
 		clampf(position.y, ARENA_BOUNDS.position.y + 36.0, ARENA_BOUNDS.end.y - 36.0)
@@ -488,6 +568,7 @@ func _spawn_enemy() -> void:
 		"initial_action_delay": 0.45 + float(roll % 30) * 0.01,
 	}, player)
 	world_root.add_child(enemy)
+	enemy.navigation_fields = player.gravity_sources
 	enemy.add_to_group("enemy_normal")
 	enemy.died.connect(_on_enemy_died)
 	enemy.damaged.connect(_record_enemy_damage)
@@ -606,7 +687,7 @@ func _mode_choices(choices: Array[Dictionary]) -> Array[Dictionary]:
 	if _combo_mode:
 		for choice in choices:
 			if choice["id"] == "OVERCLOCK_KERNEL":
-				choice["description"] = "Automatic processes execute faster and generate more heat. Graviton and salvo retain their own cadence."
+				choice["description"] = "Automatic processes execute faster and generate more heat. The chassis attack retains its own cadence and shares the reactor."
 	return choices
 
 
@@ -645,6 +726,23 @@ func _try_vent() -> void:
 		return
 	if is_instance_valid(player) and player.try_vent():
 		hud.flash_log("VENT // REACTOR PURGED", AMBER)
+
+
+func _on_maneuver_used(kind: String, origin: Vector2, destination: Vector2) -> void:
+	if kind == "scrapper":
+		var decoy := TowDecoyScript.new()
+		decoy.position = origin
+		decoy.player = player
+		world_root.add_child(decoy)
+	elif kind == "bastion":
+		var direction := (destination - origin).normalized()
+		for enemy in get_tree().get_nodes_in_group("enemy_normal"):
+			var offset: Vector2 = enemy.global_position - destination
+			if offset.length() < 150 and offset.normalized().dot(direction) > -0.3:
+				enemy.apply_impulse((direction + offset.normalized() * 0.4).normalized() * 210)
+		hud.flash_log("BREACH STEP // FORWARD SCREEN DISPLACED", AMBER)
+	elif kind == "redline":
+		hud.flash_log("BACKTRACE // POSITION ONLY / RESOURCES RETAINED", MAGENTA)
 
 
 func _on_player_vented(position: Vector2, heat_ratio: float) -> void:
@@ -722,6 +820,9 @@ func _end_run(victory: bool) -> void:
 	if run_ended:
 		return
 	run_ended = true
+	if is_instance_valid(hive):
+		hive.silence()
+	synth_audio.stop_flight()
 	synth_audio.play_cue(&"victory" if victory else &"death")
 	weapon_controller.enabled = false
 	if is_instance_valid(graviton):
@@ -777,7 +878,7 @@ func _build_run_report(victory: bool) -> Dictionary:
 		"Damage / DPS": "%.1f / %.1f" % [damage_dealt, damage_dealt / duration],
 		"Seed": run_seed_text,
 		"Sector": "STATIC_PROOF", "Boss": "DEFEATED" if victory else ("ACTIVE / PHASE %d" % boss.phase if is_instance_valid(boss) else ("NOT DEFEATED" if boss_spawned else "NOT REACHED")),
-		"Run mode": ("LAB / %s / %s" % [_lab_fixture.to_upper(), _lab_loadout.to_upper()]) if _combat_lab else ("GRAVITON KIT" if _combo_mode else ("DEBUG / BOSS SKIP" if debug_boss_skip else "STANDARD")),
+		"Run mode": ("LAB / %s / %s" % [_lab_fixture.to_upper(), _lab_loadout.to_upper()]) if _combat_lab else (_chassis.to_upper() + " KIT" if _combo_mode else ("DEBUG / BOSS SKIP" if debug_boss_skip else "STANDARD")),
 		"Level": level, "XP collected": total_xp_collected, "XP toward next level": "%d / %d" % [xp, xp_needed],
 		"Pickups collected": pickups_collected, "Patches installed": "%d types / %d ranks" % [upgrades.size(), patch_ranks],
 	}})
@@ -805,6 +906,9 @@ func _build_run_report(victory: bool) -> Dictionary:
 		"VENT uses / high-heat vents": "%d / %d" % [ship["vents"], ship["hot_vents"]],
 		"VENT cooldown": "%.2fs" % maxf(1.7, player.vent_base_cooldown - 0.45 * int(upgrades.get("VENT_COOLANT", 0))),
 	}})
+	if player.inertial_flight:
+		sections[2]["rows"]["Peak flight speed"] = "%.1f units/s" % player.flight_stats["peak_speed"]
+		sections[2]["rows"]["Thrust / coast / gravity time"] = "%.1f / %.1f / %.1fs" % [player.flight_stats["thrust_seconds"], player.flight_stats["coast_seconds"], player.flight_stats["gravity_seconds"]]
 	var sources := ["MASS_DRIVER", "MASS_DRIVER_FORK", "MASS_DRIVER_RETURN", "ARC_EXE", "VENT"]
 	for source_id in source_stats:
 		if not sources.has(source_id):
@@ -813,7 +917,7 @@ func _build_run_report(victory: bool) -> Dictionary:
 		var entry := _source_entry(StringName(source_id))
 		var damage := float(entry["damage"])
 		var rows := {
-			"Activations" if source_id in ["ARC_EXE", "VENT"] else "Projectiles fired": entry["attacks"],
+			"Activations" if source_id in ["ARC_EXE", "VENT", "GRAVITY_COLLAPSE"] else ("Damage ticks" if source_id in ["SIEGE_LANCE", "CORONA_DRIVE"] else "Projectiles fired"): entry["attacks"],
 			"Hits / kills": "%d / %d" % [entry["hits"], entry["kills"]],
 			"Damage / share": "%.1f / %.1f%%" % [damage, damage * 100.0 / maxf(damage_dealt, 0.001)],
 			"Average DPS (whole run)": "%.1f" % (damage / duration),
@@ -833,7 +937,10 @@ func _build_run_report(victory: bool) -> Dictionary:
 	if _combo_mode:
 		combo["phase_uses"] = player.phase_uses
 		combo["phase_distance"] = player.phase_distance
-		sections.append({"title": "GRAVITON / SALVO KIT", "rows": combo})
+		combo["kind"] = _chassis
+		combo["maneuver"] = ChassisCatalogScript.get_ship(_chassis)["maneuver"]
+		combo["maneuver_cooldown"] = player.maneuver_cooldown
+		sections.append({"title": _chassis.to_upper() + " KIT", "rows": combo})
 	return {"sections": sections, "scorecard": {
 		"time": elapsed_time, "kills": kills, "level": level,
 		"damage": damage_dealt, "dps": damage_dealt / duration,
@@ -847,7 +954,9 @@ func _build_run_report(victory: bool) -> Dictionary:
 		"hull": player.hull, "max_hull": player.max_hull,
 		"shield": player.shield, "max_shield": player.max_shield,
 		"heat": player.heat, "max_heat": player.max_heat, "ship": ship.duplicate(true),
-		"combo": combo, "chassis": "GRAVITON / 01" if _combo_mode else "COURIER / 01",
+		"combo": combo, "chassis": (ChassisCatalogScript.get_ship(_chassis)["name"] + " / 01") if _combo_mode else "COURIER / 01",
+		"flight": player.get_flight_telemetry(),
+		"zoom": combat_view.zoom_level,
 	}}
 
 
@@ -856,7 +965,19 @@ func _restart_run() -> void:
 	if _combat_lab:
 		_reset_lab()
 		return
+	if get_parent().has_method("launch_run"):
+		get_parent().call_deferred("launch_run", false, _chassis, not _combo_mode)
+		return
 	get_tree().reload_current_scene()
+
+
+func _return_to_menu() -> void:
+	_cancel_active_input()
+	get_tree().paused = false
+	if get_parent().has_method("show_menu"):
+		get_parent().call_deferred("show_menu")
+	else:
+		get_tree().change_scene_to_file("res://src/boot.tscn")
 
 
 func _show_arc(points: PackedVector2Array, color: Color) -> void:
@@ -892,7 +1013,7 @@ func _show_ring(position: Vector2, radius: float, color: Color, duration: float)
 
 
 func _shake_camera(amount: float, duration: float) -> void:
-	if not is_instance_valid(camera):
+	if Experience.reduced_effects or not is_instance_valid(camera):
 		return
 	if is_instance_valid(_camera_tween):
 		_camera_tween.kill()
@@ -910,7 +1031,7 @@ func _update_hud(force: bool = false) -> void:
 	var state := player.get_status()
 	var threat := "ROOT" if boss_spawned else ("03" if elapsed_time >= 210.0 else ("02" if elapsed_time >= 100.0 else "01"))
 	var status := {
-		"process": "GRAVITON/SALVO+ARC" if _combo_mode else "MASS_DRIVER+ARC.EXE",
+		"process": (ChassisCatalogScript.get_ship(_chassis)["name"] + "/" + ChassisCatalogScript.get_ship(_chassis)["attack"]) if _combo_mode else "MASS_DRIVER+ARC.EXE",
 		"sector": "STATIC_PROOF",
 		"seed": run_seed_text,
 		"threat": threat,
@@ -926,8 +1047,13 @@ func _update_hud(force: bool = false) -> void:
 		"vent_ready": state["vent_ready"],
 		"vent_cooldown": state["vent_cooldown"],
 		"fps": Engine.get_frames_per_second(),
+		"flight": player.get_flight_telemetry(),
+		"zoom": combat_view.zoom_level,
 	}
 	if _combo_mode:
+		status["chassis"] = _chassis
+		status["attack_name"] = ChassisCatalogScript.get_ship(_chassis)["attack"]
+		status["maneuver_name"] = ChassisCatalogScript.get_ship(_chassis)["maneuver"]
 		status["phase_cooldown"] = player.phase_cooldown
 		status["rack_loaded"] = graviton.loaded_count if graviton.is_charging else 0
 		status["rack_affordable"] = mini(int(status["rack_loaded"]), maxi(0, floori((player.max_heat - player.heat) / 4.0)))
@@ -964,6 +1090,10 @@ func _parse_command_line() -> void:
 			_using_touch = true
 		elif argument == "--classic":
 			_combo_mode = false
+		elif argument == "--direct-flight":
+			_direct_flight = true
+		elif argument.begins_with("--chassis="):
+			_chassis = argument.trim_prefix("--chassis=")
 		elif argument == "--combo-lab":
 			_combat_lab = true
 			_combo_mode = true
@@ -990,10 +1120,12 @@ func _parse_command_line() -> void:
 		run_seed_text = END_SCREEN_CAPTURE_SEED
 	if _smoke_test or _capture_end_screen:
 		_combo_mode = false
-	if _lab_fixture not in ["cluster", "dispersed", "boss"]:
+	if _lab_fixture not in ["cluster", "dispersed", "boss", "orbit"]:
 		_lab_fixture = "cluster"
 	if _lab_loadout not in ["salvo", "gravity", "chain"]:
 		_lab_loadout = "chain"
+	if _chassis not in ChassisCatalogScript.ORDER:
+		_chassis = "graviton"
 
 
 func _seed_roll(channel: String, index: int) -> int:

@@ -158,13 +158,14 @@ func _arsenal(r: Rect2, portrait: bool = false) -> void:
 	var width := r.size.x - 28
 	var ids: Array = SOURCE_ORDER.duplicate()
 	if not data.get("combo", {}).is_empty():
-		ids = ["GRAVITON_SALVO", "MASS_DRIVER", "ARC_EXE", "MASS_DRIVER_RETURN", "MASS_DRIVER_FORK"]
+		var manual_source: String = {"graviton": "GRAVITON_SALVO", "bastion": "SIEGE_LANCE", "scrapper": "GRAVITY_COLLAPSE", "redline": "CORONA_DRIVE"}.get(data["combo"].get("kind", "graviton"), "GRAVITON_SALVO")
+		ids = [manual_source, "MASS_DRIVER", "ARC_EXE", "MASS_DRIVER_RETURN", "MASS_DRIVER_FORK"]
 	for id: String in sources:
 		if not ids.has(id) and not (id == "VENT" and not data.get("combo", {}).is_empty()):
 			ids.append(id)
 	if not portrait:
 		_text("PROCESS", Vector2(x, y), 9, MUTED, width * 0.29)
-		for item in [["DAMAGE", 0.30, 0.16], ["DPS", 0.47, 0.11], ["FIRED", 0.59, 0.09], ["HITS", 0.69, 0.09], ["KILLS", 0.79, 0.09], ["SHARE", 0.89, 0.11]]:
+		for item in [["DAMAGE", 0.30, 0.16], ["DPS", 0.47, 0.11], ["CAST/TICK", 0.59, 0.09], ["HITS", 0.69, 0.09], ["KILLS", 0.79, 0.09], ["SHARE", 0.89, 0.11]]:
 			_text(item[0], Vector2(x + width * item[1], y), 9, MUTED, width * item[2], HORIZONTAL_ALIGNMENT_RIGHT)
 		y += 10
 	var row_height := (r.end.y - 52 - y) / maxi(ids.size(), 1)
@@ -213,7 +214,12 @@ func _ship(r: Rect2) -> void:
 		["SHIELD RECHARGE", config.get("Shield recharge", "--")],
 		["HIT PROTECTION", config.get("Hit protection", "--")],
 	]
-	_rows(entries, Vector2(x, y), width, (r.end.y - 12 - y) / 6)
+	var flight: Dictionary = data.get("flight", {})
+	if flight.get("inertial", false):
+		var stats: Dictionary = flight.get("stats", {})
+		entries[3] = ["CRUISE / PEAK", "%.0f / %.0f u/s" % [flight.get("cruise", 0), stats.get("peak_speed", 0)]]
+		entries[4] = ["COAST / DISTANCE", "%.1fs / %.0fu" % [stats.get("coast_seconds", 0), ship.get("distance", 0)]]
+	_rows(entries, Vector2(x, y), width, (r.end.y - 12 - y) / maxi(entries.size(), 1))
 
 
 func _reactor(r: Rect2) -> void:
@@ -242,7 +248,7 @@ func _reactor(r: Rect2) -> void:
 			["KIT HEAT SPENT", "%.1f" % float(data["combo"].get("heat_spent", 0))],
 			["COOLING", config.get("Cooling", "--")],
 			["THROTTLED", "%.1fs" % float(ship.get("throttled_seconds", 0))],
-			["PHASE COOLDOWN", "4.20s / NO HEAT COST"],
+			[data["combo"].get("maneuver", "PHASE SKIP"), "%.2fs / NO HEAT" % data["combo"].get("maneuver_cooldown", 4.2)],
 		]
 	_rows(entries, Vector2(x, y), width, (r.end.y - 12 - y) / 5)
 
@@ -257,6 +263,12 @@ func _combo_details(r: Rect2, strip: bool = false) -> void:
 		["CHARGING / HEAT SPENT", "%.1fs / %.1f" % [kit.get("charge_seconds", 0), kit.get("heat_spent", 0)]],
 		["PHASE USES / DISTANCE", "%d / %.0f" % [kit.get("phase_uses", 0), kit.get("phase_distance", 0)]],
 	]
+	var kind: String = kit.get("kind", "graviton")
+	if kind != "graviton":
+		items[1] = ["ACTIVATIONS / DAMAGE TICKS", "%d / %d" % [kit.get("salvos", 0), kit.get("damage_ticks", 0)]]
+		items[2] = ["CONTACT TIME / HITS", "%.1fs / %d" % [kit.get("contact_seconds", 0), kit.get("hits", 0)]]
+		items[3] = ["PULL CONTACTS / HEAT STOPS", "%d / %d" % [kit.get("grouped", 0), kit.get("overheat_stops", 0)]]
+		items[5][0] = String(kit.get("maneuver", "MANEUVER")) + " / DISTANCE"
 	if strip:
 		for index in items.size():
 			var cell := Rect2(r.position + Vector2(index * r.size.x / 6, 0), Vector2(r.size.x / 6 - 8, r.size.y))
@@ -264,7 +276,7 @@ func _combo_details(r: Rect2, strip: bool = false) -> void:
 			_text(items[index][0], cell.position + Vector2(9, 13), 9, MUTED, cell.size.x - 18)
 			_text(items[index][1], cell.position + Vector2(9, 33), 15, CYAN, cell.size.x - 18)
 	else:
-		_panel(r, "06 / GRAVITON + SALVO KIT")
+		_panel(r, "06 / " + kind.to_upper() + " KIT")
 		_rows(items, r.position + Vector2(14, 58), r.size.x - 28, (r.size.y - 80) / 6)
 
 
@@ -386,4 +398,4 @@ func _time(seconds: float) -> String:
 
 
 func _source_label(id: String) -> String:
-	return {"GRAVITON_SALVO": "GRAVITON SALVO", "MASS_DRIVER": "MASS DRIVER", "ARC_EXE": "ARC.EXE", "MASS_DRIVER_RETURN": "RETURN VECTOR", "MASS_DRIVER_FORK": "FORK ON KILL", "VENT": "VENT PULSE"}.get(id, id)
+	return {"GRAVITON_SALVO": "GRAVITON SALVO", "MASS_DRIVER": "MASS DRIVER", "ARC_EXE": "ARC.EXE", "MASS_DRIVER_RETURN": "RETURN VECTOR", "MASS_DRIVER_FORK": "FORK ON KILL", "VENT": "VENT PULSE"}.get(id, id.replace("_", " "))

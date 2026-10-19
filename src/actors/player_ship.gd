@@ -7,11 +7,13 @@ signal heat_changed(current: float, maximum: float)
 signal vented(position: Vector2, heat_ratio: float)
 signal damaged(amount: float, hull_damage: float)
 signal died
+signal maneuver_used(kind: String, origin: Vector2, destination: Vector2)
 
 const CYAN := Color("68f7e5")
 const CYAN_DIM := Color("1f827e")
 const AMBER := Color("ffbd4a")
 const RED := Color("ff496c")
+const ChassisCatalogScript := preload("res://src/systems/chassis_catalog.gd")
 
 var max_hull: float = 100.0
 var hull: float = 100.0
@@ -19,6 +21,21 @@ var max_shield: float = 30.0
 var shield: float = 30.0
 var move_speed: float = 285.0
 var acceleration: float = 1900.0
+var inertial_flight := false
+var thrust_acceleration := 560.0
+var linear_drag := 0.25
+var gravity_sources: Array[Node2D] = []
+var external_acceleration := Vector2.ZERO
+var flight_gravity := Vector2.ZERO
+var flight_thrust := Vector2.ZERO
+var flight_stats := {"peak_speed": 0.0, "thrust_seconds": 0.0, "coast_seconds": 0.0, "gravity_seconds": 0.0}
+var chassis_id := "graviton"
+var maneuver_distance := 210.0
+var maneuver_cooldown := 4.2
+var maneuver_protection := 0.22
+var _position_history: Array[Dictionary] = []
+var _history_clock := 0.0
+var _history_sample_left := 0.0
 
 var heat: float = 0.0
 var max_heat: float = 100.0
@@ -63,6 +80,7 @@ func _ready() -> void:
 	add_to_group("player")
 	collision_layer = 1
 	collision_mask = 2
+	motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
 	var collision := CollisionShape2D.new()
 	var circle := CircleShape2D.new()
 	circle.radius = 14.0
@@ -101,23 +119,153 @@ func _physics_process(delta: float) -> void:
 		if not is_equal_approx(old_shield, shield):
 			shield_changed.emit(shield, max_shield)
 
-	var desired_velocity := move_intent.limit_length() * move_speed
-	if _escape_thrust_left > 0.0:
-		desired_velocity += _escape_direction * move_speed * 0.45
-	velocity = velocity.move_toward(desired_velocity, acceleration * delta)
+	if inertial_flight:
+		flight_gravity = sample_gravity(global_position)
+		flight_thrust = get_thrust_acceleration(velocity, move_intent)
+		var force := flight_gravity + flight_thrust
+		if _escape_thrust_left > 0:
+			force += _escape_direction * thrust_acceleration * 0.45
+		velocity = integrate_velocity(velocity, force, delta)
+		flight_stats["peak_speed"] = maxf(flight_stats["peak_speed"], velocity.length())
+		if move_intent.length_squared() > 0.01:
+			flight_stats["thrust_seconds"] += delta
+		elif velocity.length_squared() > 25:
+			flight_stats["coast_seconds"] += delta
+		if flight_gravity.length_squared() > 1:
+			flight_stats["gravity_seconds"] += delta
+	else:
+		var desired_velocity := move_intent.limit_length() * move_speed
+		if _escape_thrust_left > 0.0:
+			desired_velocity += _escape_direction * move_speed * 0.45
+		velocity = velocity.move_toward(desired_velocity, acceleration * delta)
 	var previous_position := global_position
 	move_and_slide()
 	global_position = Vector2(
 		clampf(global_position.x, arena_bounds.position.x + 24.0, arena_bounds.end.x - 24.0),
 		clampf(global_position.y, arena_bounds.position.y + 24.0, arena_bounds.end.y - 24.0)
 	)
+	# The arena limit absorbs only outward momentum, not the tangential slide.
+	if global_position.x <= arena_bounds.position.x + 24 and velocity.x < 0 or global_position.x >= arena_bounds.end.x - 24 and velocity.x > 0:
+		velocity.x = 0
+	if global_position.y <= arena_bounds.position.y + 24 and velocity.y < 0 or global_position.y >= arena_bounds.end.y - 24 and velocity.y > 0:
+		velocity.y = 0
 	run_stats["distance"] += global_position.distance_to(previous_position)
+	_record_history(delta)
 
 	if combo_mode and unleash_loaded > 0:
 		rotation = lerp_angle(rotation, (unleash_focus - global_position).angle(), minf(1.0, delta * 15))
+	elif inertial_flight and aim_active:
+		rotation = lerp_angle(rotation, aim_direction.angle(), 1.0 - exp(-10.0 * delta))
+	elif inertial_flight and move_intent.length_squared() > 0.01:
+		rotation = lerp_angle(rotation, move_intent.angle(), 1.0 - exp(-10.0 * delta))
 	elif velocity.length_squared() > 16.0:
-		rotation = lerp_angle(rotation, velocity.angle(), minf(1.0, delta * 9.0))
+		if not inertial_flight:
+			rotation = lerp_angle(rotation, velocity.angle(), minf(1.0, delta * 9.0))
 	queue_redraw()
+
+
+func get_thrust_acceleration(current_velocity: Vector2, input: Vector2) -> Vector2:
+	var intent := input.limit_length()
+	if intent.length_squared() < 0.0001:
+		return Vector2.ZERO
+	# Cruise governor limits acceleration ALONG the commanded thrust. It never
+	# deletes sideways momentum, and reverse thrust remains fully available.
+	var along := current_velocity.dot(intent.normalized())
+	var governor := clampf((move_speed - along) / 90.0, 0.0, 1.0)
+	return intent * thrust_acceleration * governor
+
+
+func integrate_velocity(current_velocity: Vector2, force: Vector2, delta: float) -> Vector2:
+	var decay := exp(-maxf(0.0, linear_drag) * delta)
+	var next := current_velocity * decay + force * ((1.0 - decay) / linear_drag if linear_drag > 0.00001 else delta)
+	# A bounded game envelope, not an orbital-physics claim. Gravity can carry
+	# the ship above its governed thrust cruise; forces cannot grow without limit.
+	return next.limit_length(move_speed * 2.2)
+
+
+func sample_gravity(position: Vector2) -> Vector2:
+	var result := external_acceleration
+	for source in gravity_sources:
+		if is_instance_valid(source) and not source.is_queued_for_deletion():
+			result += Vector2(source.call("acceleration_at", position))
+	return result.limit_length(240.0)
+
+
+func get_flight_telemetry() -> Dictionary:
+	var speed := velocity.length()
+	return {
+		"inertial": inertial_flight, "velocity": velocity, "speed": speed,
+		"cruise": move_speed, "speed_limit": move_speed * 2.2,
+		"heading": fposmod(roundf(rad_to_deg(rotation) + 90), 360),
+		"track": fposmod(rad_to_deg(velocity.angle()) + 90, 360) if speed > 1 else -1.0,
+		"drift": absf(rad_to_deg(wrapf(velocity.angle() - rotation, -PI, PI))) if speed > 1 else 0.0,
+		"throttle": move_intent.length(), "thrust": flight_thrust, "gravity": flight_gravity,
+		"drag": linear_drag if inertial_flight else 0.0,
+		"counterthrust": move_intent.dot(velocity) < -5,
+		"stats": flight_stats.duplicate(),
+	}
+
+
+func configure_chassis(id: String) -> void:
+	chassis_id = id if id in ChassisCatalogScript.ORDER else "graviton"
+	var spec := ChassisCatalogScript.get_ship(chassis_id)
+	max_hull = spec["hull"]
+	hull = max_hull
+	max_shield = spec["shield"]
+	shield = max_shield
+	move_speed = spec["cruise"]
+	thrust_acceleration = spec["thrust"]
+	linear_drag = spec["drag"]
+	heat_cooling_per_second = spec["cooling"]
+	maneuver_distance = spec["step"]
+	maneuver_cooldown = spec["cooldown"]
+	maneuver_protection = spec["protection"]
+	clear_flight_history()
+
+
+func clear_flight_history() -> void:
+	_position_history.clear()
+	_history_clock = 0
+	_history_sample_left = 0
+
+
+func _record_history(delta: float) -> void:
+	if chassis_id != "redline":
+		return
+	_history_clock += delta
+	_history_sample_left -= delta
+	if _history_sample_left <= 0:
+		_history_sample_left = 0.05
+		_position_history.append({"time": _history_clock, "position": global_position})
+	while not _position_history.is_empty() and _position_history[0]["time"] < _history_clock - 1.6:
+		_position_history.pop_front()
+
+
+func maneuver_destination() -> Vector2:
+	var direction := move_intent.normalized() if move_intent.length_squared() > 0.02 else last_move_direction
+	var destination := global_position + direction * maneuver_distance
+	if chassis_id == "redline":
+		# Only a position is stored; heat, health, cooldowns and world state
+		# cannot be rewound by this history.
+		if _position_history.size() >= 2 and _history_clock - _position_history[0]["time"] >= 1.0:
+			var chosen: Vector2 = _position_history[0]["position"]
+			for point in _position_history:
+				if point["time"] <= _history_clock - 1.2:
+					chosen = point["position"]
+			destination = global_position + (chosen - global_position).limit_length(maneuver_distance)
+		else:
+			destination = global_position + direction * 130
+	destination.x = clampf(destination.x, arena_bounds.position.x + 24, arena_bounds.end.x - 24)
+	destination.y = clampf(destination.y, arena_bounds.position.y + 24, arena_bounds.end.y - 24)
+	var query := PhysicsShapeQueryParameters2D.new()
+	var shape := CircleShape2D.new()
+	shape.radius = 14
+	query.shape = shape
+	query.transform = Transform2D(0, global_position)
+	query.motion = destination - global_position
+	query.collision_mask = 16
+	var fraction := get_world_2d().direct_space_state.cast_motion(query)
+	return global_position + query.motion * fraction[0] if not fraction.is_empty() else destination
 
 
 func set_move_intent(value: Vector2) -> void:
@@ -137,29 +285,17 @@ func get_team() -> StringName:
 func try_phase_skip() -> bool:
 	if is_dead or phase_cooldown > 0:
 		return false
-	var direction := move_intent.normalized() if move_intent.length_squared() > 0.02 else last_move_direction
-	var destination := global_position + direction * 210.0
-	destination.x = clampf(destination.x, arena_bounds.position.x + 24, arena_bounds.end.x - 24)
-	destination.y = clampf(destination.y, arena_bounds.position.y + 24, arena_bounds.end.y - 24)
-	# Terrain has its own layer: enemy bodies must not block a phase skip.
-	var query := PhysicsShapeQueryParameters2D.new()
-	var shape := CircleShape2D.new()
-	shape.radius = 14
-	query.shape = shape
-	query.transform = Transform2D(0, global_position)
-	query.motion = destination - global_position
-	query.collision_mask = 16
-	var fraction := get_world_2d().direct_space_state.cast_motion(query)
-	if not fraction.is_empty():
-		destination = global_position + query.motion * fraction[0]
+	var destination := maneuver_destination()
 	var traveled := global_position.distance_to(destination)
 	if traveled < 2:
 		return false
+	var departure := global_position
 	global_position = destination
-	phase_cooldown = 4.2
-	_invulnerable_left = maxf(_invulnerable_left, 0.22)
+	phase_cooldown = maneuver_cooldown
+	_invulnerable_left = maxf(_invulnerable_left, maneuver_protection)
 	phase_uses += 1
 	phase_distance += traveled
+	maneuver_used.emit(chassis_id, departure, destination)
 	queue_redraw()
 	return true
 
@@ -296,10 +432,28 @@ func _draw() -> void:
 		Vector2(-7.0, 0.0),
 		Vector2(-12.0, 12.0),
 	])
+	match chassis_id:
+		"bastion": ship = PackedVector2Array([Vector2(25,-5),Vector2(25,5),Vector2(12,5),Vector2(7,17),Vector2(-17,17),Vector2(-21,0),Vector2(-17,-17),Vector2(7,-17),Vector2(12,-5)])
+		"scrapper": ship = PackedVector2Array([Vector2(24,-16),Vector2(13,-3),Vector2(24,16),Vector2(-8,19),Vector2(-19,8),Vector2(-19,-8),Vector2(-8,-19)])
+		"redline": ship = PackedVector2Array([Vector2(29,0),Vector2(-17,8),Vector2(-7,0),Vector2(-17,-8)])
+	if combo_mode:
+		hull_color = Color(ChassisCatalogScript.get_ship(chassis_id)["color"]) if not is_dead else RED
 	draw_colored_polygon(ship, Color(0.02, 0.10, 0.11, 0.95))
 	draw_polyline(ship + PackedVector2Array([ship[0]]), hull_color, 2.2, true)
 	draw_circle(Vector2.ZERO, 4.0, AMBER if get_heat_ratio() > 0.75 else CYAN)
-	if combo_mode:
+	if combo_mode and chassis_id != "graviton":
+		var active_color := Color(ChassisCatalogScript.get_ship(chassis_id)["color"])
+		var extension := 6 + unleash_charge_ratio * 11
+		if chassis_id == "bastion":
+			for side in [-1, 1]:
+				draw_line(Vector2(9, side * 7), Vector2(24 + extension, side * 7), active_color, 3, true)
+		elif chassis_id == "scrapper":
+			for side in [-1, 1]:
+				draw_line(Vector2(7, side * (11 + extension * 0.3)), Vector2(26, side * (19 + extension * 0.5)), active_color, 3, true)
+		else:
+			for side in [-1, 1]:
+				draw_line(Vector2(-12, side * 8), Vector2(8, side * (8 + get_heat_ratio() * 9)), active_color, 2 + get_heat_ratio() * 2, true)
+	if combo_mode and chassis_id == "graviton":
 		var spread := 15.0 + unleash_charge_ratio * 8.0
 		for side in [-1.0, 1.0]:
 			var rack := Rect2(-12, side * spread - 5, 24, 10)
@@ -316,6 +470,33 @@ func _draw() -> void:
 		draw_arc(Vector2.ZERO, 24.0, -2.45, 2.45, 32, Color(CYAN_DIM, 0.75), 2.0)
 	if _invulnerable_left > 0.0 and not is_dead:
 		draw_arc(Vector2.ZERO, 29.0, 0.0, TAU, 30, Color(AMBER, 0.45), 1.5)
-	if velocity.length_squared() > 100.0 and not is_dead:
+	if inertial_flight and not is_dead:
+		if chassis_id == "redline" and not _position_history.is_empty():
+			var echo := to_local(maneuver_destination())
+			draw_arc(echo, 13, 0, TAU, 24, Color("ff7188"), 1, true)
+			draw_line(echo + Vector2(-5, 0), echo + Vector2(5, 0), Color("ff7188"), 1)
+		# A world-space velocity marker and no-thrust coast prediction remain
+		# independent of the ship's nose and show bending inside gravity fields.
+		if velocity.length_squared() > 25:
+			var vdir := velocity.normalized().rotated(-rotation)
+			var marker := vdir * 48
+			draw_arc(marker, 5, 0, TAU, 20, AMBER, 1.4, true)
+			draw_line(marker - vdir.orthogonal() * 9, marker + vdir.orthogonal() * 9, AMBER, 1, true)
+			var p := global_position
+			var v := velocity
+			for index in range(16):
+				v = integrate_velocity(v, sample_gravity(p), 0.075)
+				p += v * 0.075
+				draw_circle(to_local(p), 1.2, Color(AMBER, 0.55 * (1.0 - float(index) / 16)))
+		if flight_gravity.length_squared() > 4:
+			var gdir := flight_gravity.normalized().rotated(-rotation)
+			draw_line(gdir * 30, gdir * (35 + minf(25, flight_gravity.length() * 0.15)), Color("b39cff"), 2, true)
+		if move_intent.length_squared() > 0.01:
+			var exhaust := -move_intent.normalized().rotated(-rotation)
+			var flicker := 1.0 if Experience.reduced_effects else 1.0 + sin(Time.get_ticks_msec() * 0.045) * 0.15
+			draw_line(exhaust * 12, exhaust * (19 + move_intent.length() * 16 * flicker), AMBER, 3, true)
+			for side in [-1, 1]:
+				draw_line(exhaust * 12 + exhaust.orthogonal() * side * 5, exhaust * 22 + exhaust.orthogonal() * side * 4, CYAN_DIM, 1.4, true)
+	elif velocity.length_squared() > 100.0 and not is_dead:
 		var flame_length := clampf(velocity.length() / move_speed, 0.2, 1.0) * 14.0
 		draw_line(Vector2(-10.0, 0.0), Vector2(-10.0 - flame_length, 0.0), AMBER, 3.0)

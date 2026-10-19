@@ -8,6 +8,8 @@ extends CanvasLayer
 
 signal upgrade_selected(index: int)
 signal restart_requested
+signal menu_requested
+signal zoom_requested(direction: float)
 signal touch_move_changed(direction: Vector2)
 signal touch_vent_pressed
 signal touch_target_bias(direction: Vector2, active: bool)
@@ -36,6 +38,7 @@ const TOUCH_MARGIN := 24.0
 const MODAL_EDGE_PADDING := 16.0
 const END_PANEL_MAX_WIDTH := 1800.0
 const ScorecardScript = preload("res://src/ui/run_scorecard.gd")
+const FlightTelemetryScript = preload("res://src/ui/flight_telemetry.gd")
 
 var _root: Control
 var _status_panel: PanelContainer
@@ -64,6 +67,7 @@ var _end_tab_buttons: Array[Button] = []
 var _end_footer: Label
 var _end_report: Dictionary = {}
 var _restart_button: Button
+var _menu_button: Button
 var _pause_overlay: ColorRect
 var _pause_center: CenterContainer
 var _pause_panel: PanelContainer
@@ -98,6 +102,11 @@ var _lab_bar: HBoxContainer
 var _fixture_picker: OptionButton
 var _loadout_picker: OptionButton
 var _touch_pause: Button
+var _flight_panel: Control
+var _chassis := "graviton"
+var _combat_rail: Control
+var _zoom_controls: HBoxContainer
+var _zoom_label: Label
 
 
 func _ready() -> void:
@@ -106,6 +115,7 @@ func _ready() -> void:
 	_build_theme_and_root()
 	_build_status()
 	_build_touch_controls()
+	_build_zoom_controls()
 	_build_combo_controls()
 	_build_upgrade_overlay()
 	_build_end_overlay()
@@ -129,6 +139,8 @@ func _exit_tree() -> void:
 ## integrity/hp, max_integrity/max_hp, heat, max_heat, xp, xp_next,
 ## vent_ready, vent_cooldown, and fps.
 func set_status(status: Dictionary) -> void:
+	_combat_rail.set_snapshot(status)
+	_zoom_label.text = "VIEW %03d%%" % roundi(float(status.get("zoom", 0.82)) * 100)
 	var process_name := _pick_text(status, ["process", "weapon"], "NO_PROCESS")
 	var level := _pick_int(status, ["level"], 1)
 	_runtime_label.text = "VOID//DAEMON  ::  %s.R%02d" % [process_name.to_upper(), level]
@@ -141,9 +153,18 @@ func set_status(status: Dictionary) -> void:
 	_clock_label.text = "T+%s" % _format_time(status.get("time", 0.0))
 	var kills := _pick_int(status, ["kills"], 0)
 	var fps_suffix := ""
+	var flight: Dictionary = status.get("flight", {})
 	if status.has("fps"):
 		fps_suffix = "  //  %d FPS" % int(status["fps"])
 	_combat_label.text = "PURGED %04d%s" % [kills, fps_suffix]
+	if not flight.is_empty() and _combo_mode:
+		_flight_panel.set_flight(flight)
+		var viewport_size := get_viewport().get_visible_rect().size
+		_flight_panel.visible = not _modal_active
+		_flight_panel.position = Vector2(12, viewport_size.y - 92)
+		_flight_panel.size = Vector2(minf(360, viewport_size.x * 0.4), 72)
+		if viewport_size.x < 700:
+			_combat_label.text = "SPD %03.0f  SLIP %02.0f  G %.0f" % [flight.get("speed", 0), flight.get("drift", 0), Vector2(flight.get("gravity", Vector2.ZERO)).length()]
 
 	var integrity := _pick_float(status, ["integrity", "hp"], 100.0)
 	var max_integrity := _pick_float(status, ["max_integrity", "max_hp"], 100.0)
@@ -171,9 +192,11 @@ func set_status(status: Dictionary) -> void:
 		flash_log(str(status["message"]), CYAN)
 	if _combo_mode:
 		var cooldown := float(status.get("phase_cooldown", 0))
-		_vent_label.text = "[PHASE: READY]" if cooldown <= 0 else "[PHASE: %.1fs]" % cooldown
+		var maneuver := String(status.get("maneuver_name", "PHASE SKIP"))
+		var short_name: String = {"PHASE SKIP": "PHASE", "BREACH STEP": "BREACH", "TOW STEP": "TOW", "BACKTRACE": "TRACE"}.get(maneuver, maneuver)
+		_vent_label.text = "[%s: READY]" % short_name if cooldown <= 0 else "[%s: %.1fs]" % [short_name, cooldown]
 		_vent_label.add_theme_color_override("font_color", GREEN if cooldown <= 0 else AMBER)
-		_vent_button.text = "PHASE SKIP\nTAP / SLIDE" if cooldown <= 0 else "PHASE SKIP\n%.1fs" % cooldown
+		_vent_button.text = maneuver + ("\nTAP / SLIDE" if cooldown <= 0 else "\n%.1fs" % cooldown)
 		var charging := bool(status.get("rack_charging", false))
 		var reload := float(status.get("rack_reload", 0))
 		if charging:
@@ -184,6 +207,12 @@ func set_status(status: Dictionary) -> void:
 		else:
 			_rack_label.text = "HOLD M1: GRAVITON + LOAD  /  RELEASE: SALVO  /  SHIFT OR SPACE: PHASE"
 		_rack_meter.value = float(status.get("rack_ratio", 0)) * 100 if charging else (0 if reload > 0 else 100)
+		if _chassis != "graviton":
+			var attack := String(status.get("attack_name", "UNLEASH"))
+			var action := "HOLD: GATHER / RELEASE: COLLAPSE" if _chassis == "scrapper" else "HOLD: SUSTAIN FIRE / RELEASE: STOP"
+			_rack_label.text = "%s // %s // SHIFT/SPACE: %s" % [attack, action, maneuver]
+			if reload > 0:
+				_rack_label.text = "%s // RECOVERING %.1fs" % [attack, reload]
 
 
 ## Opens a modal, paused upgrade picker. Choices can be strings or dictionaries.
@@ -277,8 +306,18 @@ func set_combo_mode(enabled: bool, lab: bool = false) -> void:
 
 
 func set_lab_selection(fixture: String, loadout: String) -> void:
-	_fixture_picker.select(maxi(0, ["cluster", "dispersed", "boss"].find(fixture)))
+	_fixture_picker.select(maxi(0, ["cluster", "dispersed", "boss", "orbit"].find(fixture)))
 	_loadout_picker.select(maxi(0, ["salvo", "gravity", "chain"].find(loadout)))
+
+
+func set_chassis(id: String) -> void:
+	_chassis = id
+	if id == "graviton":
+		return
+	_target_hint.text = "HOLD + DRAG\n%s\nRELEASE: %s" % [id.to_upper(), "COLLAPSE" if id == "scrapper" else "STOP FIRE"]
+	_loadout_picker.set_item_text(0, "MANUAL ONLY [F4]")
+	_loadout_picker.set_item_text(1, "BASE KIT [F5]")
+	_loadout_picker.set_item_text(2, "PATCHED CHAIN [F6]")
 
 
 func clear_combat_gesture() -> void:
@@ -469,12 +508,31 @@ func _build_status() -> void:
 	log_margin.offset_right = -26.0
 	log_margin.offset_top = -186.0
 	log_margin.offset_bottom = -150.0
+	log_margin.offset_top = -21.0
+	log_margin.offset_bottom = -1.0
 	log_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(log_margin)
-	_log_label = _new_label("", 17, CYAN)
+	_log_label = _new_label("", 10, CYAN)
 	_log_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_log_label.modulate.a = 0.0
 	log_margin.add_child(_log_label)
+	margin.hide()
+	_combat_rail = preload("res://src/ui/combat_rail.gd").new()
+	_root.add_child(_combat_rail)
+
+
+func _build_zoom_controls() -> void:
+	_zoom_controls = HBoxContainer.new()
+	_zoom_controls.add_theme_constant_override("separation", 4)
+	_root.add_child(_zoom_controls)
+	for direction in [-1.0, 1.0]:
+		var button := Button.new()
+		button.text = "−" if direction < 0 else "+"
+		button.custom_minimum_size = Vector2(44, 44)
+		button.pressed.connect(func(): zoom_requested.emit(direction))
+		_zoom_controls.add_child(button)
+	_zoom_label = _new_label("VIEW 082%", 10, CYAN_DIM)
+	_root.add_child(_zoom_label)
 
 
 func _build_touch_controls() -> void:
@@ -539,20 +597,24 @@ func _build_touch_controls() -> void:
 
 
 func _build_combo_controls() -> void:
+	_flight_panel = FlightTelemetryScript.new()
+	_flight_panel.dock_mode = true
+	_flight_panel.visible = false
+	_root.add_child(_flight_panel)
 	_rack_panel = PanelContainer.new()
 	_rack_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_rack_panel.add_theme_stylebox_override("panel", _make_box(Color("111e30"), Color("7d70a8"), 1, 10))
+	_rack_panel.add_theme_stylebox_override("panel", _make_box(Color("111e30"), Color("7d70a8"), 1, 2))
 	_root.add_child(_rack_panel)
 	var stack := VBoxContainer.new()
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_rack_panel.add_child(stack)
-	_rack_label = _new_label("", 12, Color("d4c7ff"))
-	_rack_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_rack_label = _new_label("", 11, Color("d4c7ff"))
+	_rack_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_rack_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(_rack_label)
 	_rack_meter = ProgressBar.new()
 	_rack_meter.show_percentage = false
-	_rack_meter.custom_minimum_size.y = 6
+	_rack_meter.custom_minimum_size.y = 2
 	_rack_meter.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_rack_meter.add_theme_stylebox_override("fill", _make_box(Color("b4a0ff"), TRANSPARENT, 0, 0))
 	stack.add_child(_rack_meter)
@@ -560,9 +622,9 @@ func _build_combo_controls() -> void:
 	_lab_bar.add_theme_constant_override("separation", 8)
 	_root.add_child(_lab_bar)
 	_fixture_picker = OptionButton.new()
-	for caption in ["CLUSTER [F1]", "DISPERSED [F2]", "BOSS LANE [F3]"]:
+	for caption in ["CLUSTER [F1]", "DISPERSED [F2]", "BOSS LANE [F3]", "ORBIT FIELD [F8]"]:
 		_fixture_picker.add_item(caption)
-	_fixture_picker.item_selected.connect(func(index: int): lab_fixture_requested.emit(["cluster", "dispersed", "boss"][index]))
+	_fixture_picker.item_selected.connect(func(index: int): lab_fixture_requested.emit(["cluster", "dispersed", "boss", "orbit"][index]))
 	_lab_bar.add_child(_fixture_picker)
 	_loadout_picker = OptionButton.new()
 	for caption in ["SALVO ONLY [F4]", "GRAVITON + SALVO [F5]", "FULL CHAIN [F6]"]:
@@ -661,6 +723,10 @@ func _build_end_overlay() -> void:
 	_restart_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_restart_button.pressed.connect(_on_restart_pressed)
 	_end_panel.add_child(_restart_button)
+	_menu_button = Button.new()
+	_menu_button.text = "HANGAR / CHANGE SHIP"
+	_menu_button.pressed.connect(func(): _end_modal(); menu_requested.emit())
+	_end_panel.add_child(_menu_button)
 
 
 func _set_end_page(index: int) -> void:
@@ -735,6 +801,11 @@ func _build_pause_overlay() -> void:
 		_on_restart_pressed()
 	)
 	rows.add_child(_pause_restart_button)
+	var hangar := Button.new()
+	hangar.text = "HANGAR / CHANGE SHIP / SETTINGS"
+	hangar.custom_minimum_size.y = 44
+	hangar.pressed.connect(func(): toggle_pause(false); menu_requested.emit())
+	rows.add_child(hangar)
 
 	_quit_button = Button.new()
 	_quit_button.name = "QuitButton"
@@ -857,6 +928,10 @@ func _apply_touch_visibility() -> void:
 	if not is_instance_valid(_touch_root):
 		return
 	var should_show := _touch_requested_visible and not _modal_active
+	_zoom_controls.visible = not _modal_active
+	_zoom_label.visible = not _modal_active
+	if is_instance_valid(_flight_panel):
+		_flight_panel.visible = _combo_mode and not _modal_active
 	_touch_root.visible = should_show
 	if is_instance_valid(_rack_panel):
 		_rack_panel.visible = _combo_mode and not _modal_active
@@ -886,12 +961,14 @@ func _layout_touch_controls() -> void:
 	if _combo_mode:
 		_target_zone.position = Vector2(viewport_size.x - safe_right - 256, viewport_size.y - safe_bottom - 330)
 		_target_zone.size = Vector2(220, 178)
-	_touch_pause.position = Vector2(viewport_size.x - safe_right - 68, safe_top + 154)
+	_touch_pause.position = Vector2(viewport_size.x - safe_right - 56, safe_top + 82)
 	_touch_pause.size = Vector2(44, 44)
 	if is_instance_valid(_rack_panel):
-		_rack_panel.position = Vector2(viewport_size.x * 0.25, viewport_size.y - safe_bottom - 100)
-		_rack_panel.size = Vector2(viewport_size.x * 0.48, 72)
-		_lab_bar.position = Vector2(safe_left + 24, safe_top + 154)
+		_rack_panel.position = Vector2(0, viewport_size.y - 120)
+		_rack_panel.size = Vector2(viewport_size.x, 24)
+		_lab_bar.position = Vector2(safe_left + 12, safe_top + 84)
+	_zoom_controls.position = Vector2(viewport_size.x - 112, viewport_size.y - 78)
+	_zoom_label.position = Vector2(viewport_size.x - 112, viewport_size.y - 24)
 
 
 func _layout_end_screen() -> void:
@@ -927,9 +1004,14 @@ func _layout_end_screen() -> void:
 	_restart_button.position = Vector2(maxf(0, panel_size.x - 300), panel_size.y - 44)
 	_restart_button.size = Vector2(minf(panel_size.x, 300), 44)
 	_restart_button.add_theme_font_size_override("font_size", 14)
-	_end_footer.visible = panel_size.x > 700
-	_end_footer.position = Vector2(2, panel_size.y - 30)
-	_end_footer.size = Vector2(maxf(panel_size.x - 320, 1), 24)
+	_menu_button.position = Vector2(0, panel_size.y - 44)
+	_menu_button.size = Vector2(minf(260, panel_size.x * 0.42), 44)
+	_menu_button.add_theme_font_size_override("font_size", 11)
+	_restart_button.size.x = minf(300, panel_size.x * 0.55)
+	_restart_button.position.x = panel_size.x - _restart_button.size.x
+	_end_footer.visible = panel_size.x > 1000
+	_end_footer.position = Vector2(278, panel_size.y - 30)
+	_end_footer.size = Vector2(maxf(panel_size.x - 600, 1), 24)
 
 
 func _get_safe_viewport_rect() -> Rect2:
