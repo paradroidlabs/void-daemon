@@ -7,6 +7,7 @@ signal heat_generated(amount: float)
 signal vent_pulse_requested(position: Vector2, radius: float, damage: float, force: float)
 signal combat_log(message: String, color: Color)
 signal sfx_requested(cue: StringName)
+signal weapon_triggered(weapon: String, hits: int)
 
 const CYAN := Color("68f7e5")
 const AMBER := Color("ffbd4a")
@@ -14,6 +15,13 @@ const ARC_COLOR := Color("9aa7ff")
 
 var upgrades: Dictionary = {}
 var enabled: bool = true
+var attack_held := false
+var primary_damage := 24.0
+var arc_damage := 13.0
+var primary_interval := 0.72
+var arc_interval := 1.18
+var precision_charge := 0.0
+var _precision_was_held := false
 
 var _mass_cooldown: float = 0.18
 var _arc_cooldown: float = 0.7
@@ -29,14 +37,29 @@ func tick(delta: float, player: PlayerShip, enemies: Array[Node]) -> void:
 		return
 	var cadence := 1.0 + 0.10 * _rank("OVERCLOCK_KERNEL")
 	var throttle := player.get_throttle_scale()
+	if attack_held and not player.blocking:
+		precision_charge = minf(1.0, precision_charge + delta / 0.9)
+	elif _precision_was_held and precision_charge > 0.08 and not player.blocking:
+		var direction := player.aim_direction if player.aim_active else Vector2.RIGHT.rotated(player.rotation)
+		projectile_requested.emit(player.global_position + direction * 20.0, direction, {
+			"speed": 1100.0, "damage": primary_damage * lerpf(1.2, 4.0, precision_charge),
+			"lifetime": 0.7, "pierce": 2 + int(precision_charge * 4),
+			"source_id": "PRECISION", "hit_radius": 6.0, "color": AMBER,
+		}, &"player")
+		heat_generated.emit(8.0 + 12.0 * precision_charge)
+		weapon_triggered.emit("PRECISION", 1)
+		precision_charge = 0.0
+	else:
+		precision_charge = 0.0
+	_precision_was_held = attack_held and not player.blocking
 	_mass_cooldown -= delta * cadence * throttle
 	_arc_cooldown -= delta * cadence * throttle
 	if _mass_cooldown <= 0.0:
 		_fire_mass_driver(player, enemies)
-		_mass_cooldown = 0.72
+		_mass_cooldown = primary_interval
 	if _arc_cooldown <= 0.0:
 		_fire_arc(player, enemies)
-		_arc_cooldown = 1.18
+		_arc_cooldown = arc_interval
 
 
 func on_projectile_hit(projectile: Projectile, target: Node, hit_position: Vector2, enemies: Array[Node]) -> void:
@@ -61,7 +84,9 @@ func on_projectile_hit(projectile: Projectile, target: Node, hit_position: Vecto
 			"color": AMBER,
 		})
 		projectile_requested.emit(hit_position, (child_target.global_position - hit_position).normalized(), child_stats, &"player")
-	combat_log.emit("FORK_ON_KILL // %d child process%s" % [count, "" if count == 1 else "es"], AMBER)
+	if count > 0:
+		combat_log.emit("DRIVER KILL -> %d CHILD SHOTS // 45%% DAMAGE // NO RECURSION" % count, AMBER)
+		weapon_triggered.emit("FORK", count)
 
 
 func on_projectile_expired(projectile: Projectile, reason: StringName, player_position: Vector2) -> void:
@@ -108,7 +133,7 @@ func _fire_mass_driver(player: PlayerShip, enemies: Array[Node]) -> void:
 	var driver_rank := _rank("DRIVER_RAIL")
 	var stats := {
 		"speed": 760.0,
-		"damage": 24.0,
+		"damage": primary_damage,
 		"lifetime": 1.05,
 		"pierce": 1 + driver_rank,
 		"fork_generation": 0,
@@ -118,6 +143,7 @@ func _fire_mass_driver(player: PlayerShip, enemies: Array[Node]) -> void:
 	}
 	projectile_requested.emit(player.global_position + direction * 19.0, direction, stats, &"player")
 	sfx_requested.emit(&"mass")
+	weapon_triggered.emit("MASS_DRIVER", 1)
 	heat_generated.emit(3.8 * (1.0 + 0.14 * _rank("OVERCLOCK_KERNEL")))
 
 
@@ -137,7 +163,7 @@ func _fire_arc(player: PlayerShip, enemies: Array[Node]) -> void:
 			if branch_options.is_empty():
 				continue
 			start_target = branch_options[0]
-		var points := PackedVector2Array([player.global_position])
+		var points := PackedVector2Array([player.global_position if branch == 0 else first.global_position])
 		var current: Node = start_target
 		var chain_visited: Array[Node] = []
 		var max_hits := 3 + extra_jumps
@@ -147,10 +173,10 @@ func _fire_arc(player: PlayerShip, enemies: Array[Node]) -> void:
 			chain_visited.append(current)
 			excluded.append(current)
 			points.append(current.global_position)
-			var damage := 13.0 * pow(0.9, jump)
+			var damage := arc_damage * pow(0.9, jump)
 			current.call("take_damage", damage, &"ARC_EXE", current.global_position)
 			total_hits += 1
-			var next_options := _nearest_enemies(current.global_position, enemies, chain_visited, 170.0)
+			var next_options := _nearest_enemies(current.global_position, enemies, excluded, 140.0)
 			if next_options.is_empty():
 				current = null
 				break
@@ -159,10 +185,11 @@ func _fire_arc(player: PlayerShip, enemies: Array[Node]) -> void:
 			arc_fired.emit(points, ARC_COLOR if branch == 0 else Color(AMBER, 0.88))
 		if chain_visited.size() >= max_hits:
 			full_chains += 1
-		if not chain_visited.is_empty():
+		if not chain_visited.is_empty() and _rank("CONDUCTIVE_MARK") > 0:
 			_marked_enemy = chain_visited[-1]
 
 	if total_hits > 0:
+		weapon_triggered.emit("ARC_EXE", total_hits)
 		sfx_requested.emit(&"arc")
 		var heat_scale := 1.0 + 0.12 * _rank("ARC_FANOUT") + 0.14 * _rank("OVERCLOCK_KERNEL")
 		heat_generated.emit(7.5 * heat_scale)
@@ -178,7 +205,7 @@ func _select_mass_target(player: PlayerShip, enemies: Array[Node]) -> Node2D:
 		var candidate_2d := candidate as Node2D
 		var direction: Vector2 = (candidate_2d.global_position - player.global_position).normalized()
 		var distance: float = candidate_2d.global_position.distance_to(player.global_position)
-		if player.aim_active and direction.dot(player.aim_direction) < 0.30:
+		if player.aim_active and direction.dot(player.aim_direction) < 0.30 + 0.08 * _rank("DRIVER_RAIL"):
 			continue
 		var lined_up := 0
 		for other in candidates:
@@ -202,24 +229,10 @@ func _select_mass_target(player: PlayerShip, enemies: Array[Node]) -> Node2D:
 func _select_arc_target(player: PlayerShip, enemies: Array[Node]) -> Node2D:
 	if is_instance_valid(_marked_enemy) and _is_enemy_alive(_marked_enemy):
 		var marked := _marked_enemy as Node2D
-		if marked.global_position.distance_to(player.global_position) <= 430.0:
+		if marked.global_position.distance_to(player.global_position) <= 260.0:
 			return marked
-	var candidates := _nearest_enemies(player.global_position, enemies, [], 370.0)
-	if not player.aim_active:
-		return candidates[0] if not candidates.is_empty() else null
-	var best: Node2D
-	var best_score: float = -INF
-	for candidate in candidates:
-		var candidate_2d := candidate as Node2D
-		var offset: Vector2 = candidate_2d.global_position - player.global_position
-		var dot: float = offset.normalized().dot(player.aim_direction)
-		if dot < 0.15:
-			continue
-		var score: float = dot * 200.0 - offset.length() * 0.15
-		if score > best_score:
-			best_score = score
-			best = candidate_2d
-	return best
+	var candidates := _nearest_enemies(player.global_position, enemies, [], 260.0)
+	return candidates[0] if not candidates.is_empty() else null
 
 
 func _nearest_enemies(origin: Vector2, enemies: Array[Node], excluded: Array, max_range: float) -> Array[Node]:

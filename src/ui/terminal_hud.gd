@@ -12,6 +12,9 @@ signal touch_move_changed(direction: Vector2)
 signal touch_vent_pressed
 signal touch_target_bias(direction: Vector2, active: bool)
 signal pause_toggled(is_paused: bool)
+signal touch_block_changed(active: bool)
+signal ship_selected(id: String)
+signal zoom_requested(direction: float)
 
 const CYAN := Color(0.35, 0.95, 1.0, 1.0)
 const CYAN_DIM := Color(0.13, 0.50, 0.55, 1.0)
@@ -45,6 +48,19 @@ var _xp_label: Label
 var _vent_label: Label
 var _log_label: Label
 var _log_tween: Tween
+var _weapon_label: Label
+var _dps_label: Label
+var _pause_dashboard: TabContainer
+var _pause_identity: Label
+var _damage_flash: ColorRect
+var _feedback_label: Label
+var _damage_tween: Tween
+var _ship_picker: ColorRect
+var _block_button: Button
+var _ship_diagram: Control
+var _combat_rail: Control
+var _zoom_controls: HBoxContainer
+var _zoom_label: Label
 
 var _upgrade_overlay: ColorRect
 var _upgrade_list: VBoxContainer
@@ -87,9 +103,19 @@ func _ready() -> void:
 	_build_theme_and_root()
 	_build_status()
 	_build_touch_controls()
+	_build_zoom_controls()
 	_build_upgrade_overlay()
 	_build_end_overlay()
 	_build_pause_overlay()
+	get_viewport().size_changed.connect(_layout_pause_panel)
+	_build_feedback()
+	_ship_diagram = preload("res://src/ui/ship_diagram.gd").new()
+	_ship_diagram.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ship_diagram.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_ship_diagram.position = Vector2(-338, 195)
+	_ship_diagram.size = Vector2(320, 218)
+	_root.add_child(_ship_diagram)
+	_ship_diagram.hide()
 	set_touch_controls_visible(DisplayServer.is_touchscreen_available())
 	get_viewport().size_changed.connect(_layout_touch_controls)
 	get_viewport().size_changed.connect(_layout_end_screen)
@@ -109,6 +135,8 @@ func _exit_tree() -> void:
 ## integrity/hp, max_integrity/max_hp, heat, max_heat, xp, xp_next,
 ## vent_ready, vent_cooldown, and fps.
 func set_status(status: Dictionary) -> void:
+	_combat_rail.set_snapshot(status)
+	_zoom_label.text = "VIEW %03d%%" % roundi(float(status.get("zoom", 0.82)) * 100)
 	var process_name := _pick_text(status, ["process", "weapon"], "NO_PROCESS")
 	var level := _pick_int(status, ["level"], 1)
 	_runtime_label.text = "VOID//DAEMON  ::  %s.R%02d" % [process_name.to_upper(), level]
@@ -380,19 +408,41 @@ func _build_status() -> void:
 	_vent_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_vent_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	meters.add_child(_vent_label)
+	_dps_label = _new_label("DPS 0.0 [5s]", 16, GREEN)
+	status_rows.add_child(_dps_label)
+	_weapon_label = _new_label("M1 FIRE | M2 / SPACE GUARD | SHIFT VENT BOOST | ESC STATS", 13, CYAN)
+	_weapon_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	status_rows.add_child(_weapon_label)
 
 	var log_margin := MarginContainer.new()
 	log_margin.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	log_margin.offset_left = 26.0
 	log_margin.offset_right = -26.0
-	log_margin.offset_top = -186.0
-	log_margin.offset_bottom = -150.0
+	log_margin.offset_top = -28.0
+	log_margin.offset_bottom = -4.0
 	log_margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_root.add_child(log_margin)
 	_log_label = _new_label("", 17, CYAN)
 	_log_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_log_label.modulate.a = 0.0
 	log_margin.add_child(_log_label)
+	margin.hide()
+	_combat_rail = preload("res://src/ui/combat_rail.gd").new()
+	_root.add_child(_combat_rail)
+
+
+func _build_zoom_controls() -> void:
+	_zoom_controls = HBoxContainer.new()
+	_zoom_controls.add_theme_constant_override("separation", 4)
+	_root.add_child(_zoom_controls)
+	for direction in [-1.0, 1.0]:
+		var button := Button.new()
+		button.text = "−" if direction < 0 else "+"
+		button.custom_minimum_size = Vector2(44, 44)
+		button.pressed.connect(func(): zoom_requested.emit(direction))
+		_zoom_controls.add_child(button)
+	_zoom_label = _new_label("VIEW 082%", 10, CYAN_DIM)
+	_root.add_child(_zoom_label)
 
 
 func _build_touch_controls() -> void:
@@ -427,7 +477,7 @@ func _build_touch_controls() -> void:
 
 	_vent_button = Button.new()
 	_vent_button.name = "TouchVentButton"
-	_vent_button.text = "VENT\n[ TAP ]"
+	_vent_button.text = "BOOST\nVENT"
 	_vent_button.custom_minimum_size = Vector2(128.0, 96.0)
 	_vent_button.focus_mode = Control.FOCUS_NONE
 	_vent_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -437,13 +487,20 @@ func _build_touch_controls() -> void:
 	_vent_button.add_theme_stylebox_override("pressed", _make_box(AMBER, AMBER, 3, 16.0))
 	_vent_button.pressed.connect(_on_touch_vent_pressed)
 	_touch_root.add_child(_vent_button)
+	_block_button = Button.new()
+	_block_button.text = "GUARD\nHOLD"
+	_block_button.custom_minimum_size = Vector2(110, 72)
+	_block_button.focus_mode = Control.FOCUS_NONE
+	_block_button.button_down.connect(func(): touch_block_changed.emit(true))
+	_block_button.button_up.connect(func(): touch_block_changed.emit(false))
+	_touch_root.add_child(_block_button)
 
 	_target_zone = Control.new()
 	_target_zone.name = "TargetBiasSurface"
 	_target_zone.mouse_filter = Control.MOUSE_FILTER_PASS
 	_target_zone.gui_input.connect(_on_target_gui_input)
 	_touch_root.add_child(_target_zone)
-	var target_hint := _new_label("[ DRAG TO BIAS FIRE ]", 12, CYAN_DIM)
+	var target_hint := _new_label("[ HOLD + AIM / RELEASE PRECISION ]", 12, CYAN)
 	target_hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	target_hint.offset_top = -28.0
 	target_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -553,7 +610,7 @@ func _build_pause_overlay() -> void:
 	_pause_overlay.add_child(_pause_center)
 
 	_pause_panel = PanelContainer.new()
-	_pause_panel.custom_minimum_size = Vector2(460.0, 280.0)
+	_pause_panel.custom_minimum_size = Vector2(1100.0, 650.0)
 	_pause_panel.add_theme_stylebox_override("panel", _make_box(Color(0.01, 0.035, 0.045, 0.99), CYAN, 2, 24.0))
 	_pause_center.add_child(_pause_panel)
 
@@ -567,15 +624,23 @@ func _build_pause_overlay() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rows.add_child(title)
 
-	var prompt := _new_label("// SYSTEM STANDBY // SELECT OPERATION", 13, CYAN_DIM)
-	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	rows.add_child(prompt)
+	_pause_identity = _new_label("", 14, CYAN_DIM)
+	_pause_identity.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	rows.add_child(_pause_identity)
 
 	_add_rule(rows)
 
+	_pause_dashboard = preload("res://src/ui/pause_dashboard.gd").new()
+	_pause_dashboard.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_pause_dashboard.custom_minimum_size.y = 180
+	rows.add_child(_pause_dashboard)
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 12)
+	rows.add_child(actions)
 	_resume_button = Button.new()
 	_resume_button.name = "ResumeButton"
-	_resume_button.text = "RESUME PROCESS  [ESC / P]"
+	_resume_button.text = "RESUME [ESC]"
+	_resume_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_resume_button.custom_minimum_size = Vector2(0.0, 48.0)
 	_resume_button.focus_mode = Control.FOCUS_ALL
 	_resume_button.add_theme_font_size_override("font_size", 16)
@@ -585,11 +650,12 @@ func _build_pause_overlay() -> void:
 	_resume_button.add_theme_stylebox_override("focus", _make_box(Color(0.05, 0.12, 0.15, 0.98), CYAN, 2, 8.0))
 	_resume_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_resume_button.pressed.connect(func(): toggle_pause(false))
-	rows.add_child(_resume_button)
+	actions.add_child(_resume_button)
 
 	_pause_restart_button = Button.new()
 	_pause_restart_button.name = "PauseRestartButton"
-	_pause_restart_button.text = "RESTART RUN  [R]"
+	_pause_restart_button.text = "RESTART [R]"
+	_pause_restart_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_pause_restart_button.custom_minimum_size = Vector2(0.0, 44.0)
 	_pause_restart_button.focus_mode = Control.FOCUS_ALL
 	_pause_restart_button.add_theme_font_size_override("font_size", 15)
@@ -602,11 +668,12 @@ func _build_pause_overlay() -> void:
 		toggle_pause(false)
 		_on_restart_pressed()
 	)
-	rows.add_child(_pause_restart_button)
+	actions.add_child(_pause_restart_button)
 
 	_quit_button = Button.new()
 	_quit_button.name = "QuitButton"
-	_quit_button.text = "QUIT TO DESKTOP  [Q]"
+	_quit_button.text = "QUIT [Q]"
+	_quit_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_quit_button.custom_minimum_size = Vector2(0.0, 40.0)
 	_quit_button.focus_mode = Control.FOCUS_ALL
 	_quit_button.add_theme_font_size_override("font_size", 14)
@@ -616,12 +683,12 @@ func _build_pause_overlay() -> void:
 	_quit_button.add_theme_stylebox_override("focus", _make_box(Color(0.05, 0.12, 0.15, 0.98), RED, 2, 8.0))
 	_quit_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_quit_button.pressed.connect(func(): get_tree().quit())
-	rows.add_child(_quit_button)
+	actions.add_child(_quit_button)
 
 
 ## Opens or closes the pause overlay and toggles scene tree pause.
 func toggle_pause(force_state = null) -> void:
-	if _upgrade_overlay.visible or _end_overlay.visible:
+	if _upgrade_overlay.visible or _end_overlay.visible or is_instance_valid(_ship_picker):
 		return
 	if force_state != null:
 		_is_paused = bool(force_state)
@@ -629,7 +696,9 @@ func toggle_pause(force_state = null) -> void:
 		_is_paused = not _is_paused
 
 	_pause_overlay.visible = _is_paused
+	_layout_pause_panel()
 	if _is_paused:
+		_pause_dashboard.update_snapshot(_pause_dashboard.snapshot)
 		_begin_modal()
 		_resume_button.grab_focus()
 	else:
@@ -639,6 +708,102 @@ func toggle_pause(force_state = null) -> void:
 
 func is_paused() -> bool:
 	return _is_paused
+
+
+func _layout_pause_panel() -> void:
+	var viewport_size := get_viewport().get_visible_rect().size
+	_pause_panel.custom_minimum_size = Vector2(minf(1100.0, viewport_size.x - 32.0), minf(650.0, viewport_size.y - 32.0))
+
+
+func set_combat_status(dps: String, weapons: String) -> void:
+	_dps_label.text = dps
+	_weapon_label.text = weapons
+	_combat_rail.combat_text = dps + "  /  " + weapons
+	_combat_rail.queue_redraw()
+
+
+func set_ship_diagram(mods: Dictionary, charge: float, primary: float, arc: float, chassis: String) -> void:
+	_ship_diagram.set("upgrades", mods)
+	_ship_diagram.set("charge", charge)
+	_ship_diagram.set("primary_flash", primary)
+	_ship_diagram.set("arc_flash", arc)
+	_ship_diagram.set("chassis", chassis)
+	_ship_diagram.size.y = 205 + mods.size() * 15
+	_ship_diagram.visible = false # The full schematic lives in the paused Ship tab.
+
+
+func pulse_fork() -> void:
+	_ship_diagram.set("fork_flash", 0.45)
+
+
+func set_inspection_data(value: Dictionary) -> void:
+	_pause_identity.text = "%s // SEED %s // LEVEL %d" % [value.get("chassis", ""), value.get("seed", ""), value.get("level", 1)]
+	_pause_dashboard.set("snapshot", value)
+	if _is_paused:
+		_pause_dashboard.update_snapshot(value)
+
+
+func _build_feedback() -> void:
+	_damage_flash = ColorRect.new()
+	_damage_flash.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_damage_flash.color = Color(1.0, 0.1, 0.2, 0.0)
+	_damage_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_damage_flash)
+	_feedback_label = _new_label("", 22, RED)
+	_feedback_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_feedback_label.position = Vector2(-160, 182)
+	_feedback_label.size = Vector2(320, 40)
+	_feedback_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_feedback_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_root.add_child(_feedback_label)
+
+
+func show_damage_feedback(amount: float, hull_damage: float) -> void:
+	if is_instance_valid(_damage_tween):
+		_damage_tween.kill()
+	var hull_hit := hull_damage > 0.0
+	_feedback_label.text = "%s -%.0f" % ["HULL HIT" if hull_hit else "SHIELD HIT", hull_damage if hull_hit else amount]
+	_feedback_label.modulate.a = 1.0
+	_feedback_label.add_theme_color_override("font_color", RED if hull_hit else CYAN)
+	_damage_flash.color = Color(1.0, 0.1, 0.2, 0.15) if hull_hit else Color(0.2, 0.8, 1.0, 0.08)
+	_damage_tween = create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_parallel(true)
+	_damage_tween.tween_property(_damage_flash, "color:a", 0.0, 0.3)
+	_damage_tween.tween_property(_feedback_label, "modulate:a", 0.0, 1.0)
+
+
+func show_ship_picker() -> void:
+	_ship_picker = ColorRect.new()
+	_ship_picker.color = INK
+	_ship_picker.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_root.add_child(_ship_picker)
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_ship_picker.add_child(center)
+	var rows := VBoxContainer.new()
+	rows.custom_minimum_size.x = minf(660.0, get_viewport().get_visible_rect().size.x - 48.0)
+	rows.add_theme_constant_override("separation", 12)
+	center.add_child(rows)
+	rows.add_child(_new_label("SELECT STARTER SHIP", 26, AMBER))
+	rows.add_child(_new_label("Auto weapons + M1 charge / M2 or Space guard / Shift boost", 15, CYAN))
+	var entries := {
+		"COURIER": "Balanced // 100 hull, 30 shield, speed 285",
+		"BASTION": "Armored gunship // 145 hull, 55 shield, slower heavy rounds",
+		"REDLINE": "Interceptor // speed 345, rapid fire, shorter boost cooldown, fragile",
+		"CONDUCTOR": "Chain specialist // stronger, faster ARC; improved cooling",
+	}
+	for id in entries:
+		var button := Button.new()
+		button.text = "%s\n%s" % [id, entries[id]]
+		button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		button.custom_minimum_size.y = 76.0
+		button.pressed.connect(func():
+			_ship_picker.queue_free()
+			_end_modal()
+			ship_selected.emit(id)
+		)
+		rows.add_child(button)
+	_begin_modal()
+	(rows.get_child(2) as Button).grab_focus()
 
 
 func _make_meter(caption: String, fill_color: Color) -> Dictionary:
@@ -704,6 +869,8 @@ func _set_meter(bar: ProgressBar, label: Label, current: float, maximum: float, 
 
 
 func _begin_modal() -> void:
+	if is_instance_valid(_ship_diagram):
+		_ship_diagram.hide()
 	if not _modal_active:
 		_paused_before_modal = get_tree().paused
 		_modal_active = true
@@ -717,14 +884,21 @@ func _end_modal() -> void:
 	_modal_active = false
 	get_tree().paused = _paused_before_modal
 	_apply_touch_visibility()
+	if is_instance_valid(_ship_diagram):
+		_ship_diagram.hide()
 
 
 func _apply_touch_visibility() -> void:
 	if not is_instance_valid(_touch_root):
 		return
 	var should_show := _touch_requested_visible and not _modal_active
+	_zoom_controls.visible = not _modal_active
+	_zoom_label.visible = not _modal_active
+	if is_instance_valid(_ship_diagram):
+		_ship_diagram.visible = false
 	_touch_root.visible = should_show
 	if not should_show:
+		touch_block_changed.emit(false)
 		_reset_stick()
 		_reset_target_bias()
 
@@ -733,6 +907,8 @@ func _layout_touch_controls() -> void:
 	if not is_instance_valid(_touch_root):
 		return
 	var viewport_size := get_viewport().get_visible_rect().size
+	_zoom_controls.position = Vector2(viewport_size.x - 112, viewport_size.y - 60)
+	_zoom_label.position = Vector2(viewport_size.x - 215, viewport_size.y - 42)
 	var safe_rect := _get_safe_viewport_rect()
 	var safe_left := safe_rect.position.x
 	var safe_top := safe_rect.position.y
@@ -744,6 +920,9 @@ func _layout_touch_controls() -> void:
 	_center_stick_knob()
 	_vent_button.position = Vector2(viewport_size.x - safe_right - TOUCH_MARGIN - 128.0, viewport_size.y - safe_bottom - 28.0 - 96.0)
 	_vent_button.size = Vector2(128.0, 96.0)
+	if is_instance_valid(_block_button):
+		_block_button.position = _vent_button.position - Vector2(125, 0)
+		_block_button.size = Vector2(110, 96)
 	_target_zone.position = Vector2(viewport_size.x * 0.5, safe_top + 136.0)
 	_target_zone.size = Vector2(maxf(viewport_size.x * 0.5 - safe_right, 0.0), maxf(viewport_size.y - safe_top - safe_bottom - 310.0, 80.0))
 

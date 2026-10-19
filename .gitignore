@@ -2,4 +2,9 @@
 .tools/
 builds/
 *.tmp
+combat-review.log
+smoke-review.log
+visual-review.log
+pause-visual.log
+touch-visual.log
 

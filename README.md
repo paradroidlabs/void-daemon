@@ -1,4 +1,6 @@
-# VOID//DAEMON — playable Godot prototype
+# VOID//DAEMON — Courier combat experiment
+
+This branch preserves the Courier/Guard/Boost experiment from the `4ade` worktree. It is separate from the newer four-kit [Graviton checkpoint](https://github.com/paradroidlabs/void-daemon/tree/prototype/graviton-salvo-checkpoint). See [UI layout checkpoint](UI_LAYOUT_CHECKPOINT.md): the active module panel has moved to pause inspection; combat now has an isolated viewport and adjustable 65–125% zoom (default 82%). Mouse wheel, `+`/`−` and dock buttons adjust the view. M1 precision, M2/Space guard and Shift boost remain this branch's controls.
 
 ![Gameplay — desktop HUD with MASS_DRIVER and ARC.EXE active](artifacts/prototype_capture.png)
 
@@ -47,8 +49,11 @@ You can also open `project.godot` in Godot and press **F6/F5**.
 ### Mouse and keyboard
 
 - `WASD` or arrow keys: move.
-- Mouse position: bias both weapon processes toward that direction.
-- `Space` or right mouse: `VENT` reactor heat for knockback, damage, and brief contact protection.
+- Weapons keep firing automatically. Mouse position biases DRIVER; ARC chains nearby enemies independently.
+- Hold `M1` to charge a precision shot; release to fire toward the mouse.
+- Hold `M2` or `Space`: guard (80% mitigation, limited guard resource, slower movement).
+- `Shift`: vent heat and boost in movement direction (or aim direction when stationary).
+- `Escape`: inspect stats, weapon rules, source damage, and all installed upgrades.
 - `1`, `2`, `3` or mouse: choose an upgrade.
 - `T`: show/hide the touch layer for desktop testing.
 - `F10`: debug-skip to the boss.
@@ -57,19 +62,23 @@ You can also open `project.godot` in Godot and press **F6/F5**.
 
 - Left stick: move.
 - Right stick: bias fire.
-- `A` or right shoulder: `VENT`.
+- `A`: vent + boost. Hold right shoulder for precision charge; release to fire.
+- Hold left shoulder: guard.
 - Upgrade cards use normal controller focus and accept input.
 
 ### Mobile touch
 
 - Lower-left virtual stick: move.
-- Drag on the right side: bias fire.
-- Lower-right `VENT` button: vent the reactor.
+- Hold/drag on the right side: aim and charge precision; release to fire.
+- Lower-right `BOOST / VENT` button: vent and boost.
+- Hold `GUARD`: block incoming damage.
 - Tap upgrade cards directly.
 
 The touch layout observes the platform safe area and the project is locked to landscape orientation.
 
 ## What is implemented
+
+The current gameplay audit and sequencing are in [GAMEPLAY_REVIEW.md](GAMEPLAY_REVIEW.md) and [ROADMAP.md](ROADMAP.md). Four starter profiles, a live ship/module diagram, damage numbers, rolling DPS, and a complete Escape build inspector are included.
 
 - A five-minute escalating survival phase followed by `WATCHDOG_01`, a multi-pattern boss.
 - `MASS_DRIVER`: selects dense lines and fires piercing rounds.

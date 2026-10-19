@@ -222,6 +222,7 @@ func take_damage(
 	if not _alive or amount <= 0.0:
 		return false
 
+	amount = minf(amount, health)
 	health = maxf(0.0, health - amount)
 	_flash_ticks = 4
 	var resolved_hit_position := hit_position if hit_position != Vector2.ZERO else global_position
@@ -556,9 +557,9 @@ func _draw_sentry_glyph(color: Color) -> void:
 func _draw_lane_telegraph(direction: Vector2, color: Color) -> void:
 	var safe_direction := direction.normalized() if not direction.is_zero_approx() else Vector2.RIGHT
 	var telegraph_color := Color(color, 0.55)
-	var end := safe_direction * 520.0
-	draw_line(safe_direction * collision_radius, end, telegraph_color, 2.0)
-	draw_dashed_line(safe_direction * collision_radius, end, Color.WHITE, 1.0, 9.0)
+	var end := safe_direction * 110.0
+	draw_dashed_line(safe_direction * (collision_radius + 6.0), end, telegraph_color, 2.0, 12.0)
+	draw_arc(end, 5.0, 0.0, TAU, 12, color, 1.5)
 
 
 func _draw_health_bar(color: Color) -> void:

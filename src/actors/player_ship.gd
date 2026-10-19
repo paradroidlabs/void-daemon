@@ -7,6 +7,7 @@ signal heat_changed(current: float, maximum: float)
 signal vented(position: Vector2, heat_ratio: float)
 signal damaged(amount: float, hull_damage: float)
 signal died
+signal blocked(amount: float)
 
 const CYAN := Color("68f7e5")
 const CYAN_DIM := Color("1f827e")
@@ -34,6 +35,11 @@ var aim_direction := Vector2.RIGHT
 var aim_active: bool = false
 var arena_bounds := Rect2(-1600.0, -900.0, 3200.0, 1800.0)
 var is_dead: bool = false
+var blocking := false
+var guard := 100.0
+var guard_broken := false
+var boost_left := 0.0
+var chassis := "COURIER"
 
 var _shield_delay_left: float = 0.0
 var _invulnerable_left: float = 0.0
@@ -64,6 +70,13 @@ func _physics_process(delta: float) -> void:
 		return
 
 	vent_cooldown = maxf(0.0, vent_cooldown - delta)
+	boost_left = maxf(0.0, boost_left - delta)
+	guard = clampf(guard + (-38.0 if blocking else 24.0) * delta, 0.0, 100.0)
+	if guard <= 0.0:
+		blocking = false
+		guard_broken = true
+	if guard >= 30.0:
+		guard_broken = false
 	_invulnerable_left = maxf(0.0, _invulnerable_left - delta)
 	_shield_delay_left = maxf(0.0, _shield_delay_left - delta)
 	_escape_thrust_left = maxf(0.0, _escape_thrust_left - delta)
@@ -80,6 +93,10 @@ func _physics_process(delta: float) -> void:
 			shield_changed.emit(shield, max_shield)
 
 	var desired_velocity := move_intent.limit_length() * move_speed
+	if blocking:
+		desired_velocity *= 0.55
+	if boost_left > 0.0:
+		desired_velocity += _escape_direction * move_speed * 1.4
 	if _escape_thrust_left > 0.0:
 		desired_velocity += _escape_direction * move_speed * 0.45
 	velocity = velocity.move_toward(desired_velocity, acceleration * delta)
@@ -145,6 +162,8 @@ func try_vent() -> bool:
 		return false
 	var ratio := get_heat_ratio()
 	vent_cooldown = maxf(1.7, vent_base_cooldown - _vent_cooldown_reduction)
+	boost_left = 0.55
+	_escape_direction = move_intent.normalized() if move_intent.length_squared() > 0.01 else aim_direction
 	_invulnerable_left = maxf(_invulnerable_left, 0.24)
 	heat = 0.0
 	heat_changed.emit(heat, max_heat)
@@ -157,6 +176,12 @@ func take_damage(amount: float, source_position: Vector2 = Vector2.INF) -> bool:
 	if is_dead or _invulnerable_left > 0.0 or amount <= 0.0:
 		return false
 	var remaining := amount
+	if blocking and guard > 0.0:
+		var prevented := amount * 0.8
+		remaining -= prevented
+		guard = maxf(0.0, guard - prevented * 1.5)
+		blocked.emit(prevented)
+	var received := remaining
 	if shield > 0.0:
 		var absorbed := minf(shield, remaining)
 		shield -= absorbed
@@ -171,7 +196,7 @@ func take_damage(amount: float, source_position: Vector2 = Vector2.INF) -> bool:
 	if source_position != Vector2.INF:
 		_escape_direction = (global_position - source_position).normalized()
 		_escape_thrust_left = 0.35 if _extra_collision_grace > 0.0 else 0.0
-	damaged.emit(amount, hull_damage)
+	damaged.emit(received, hull_damage)
 	if hull <= 0.0:
 		is_dead = true
 		died.emit()
@@ -200,7 +225,7 @@ func apply_upgrade(upgrade_id: String, rank: int) -> void:
 			shield_changed.emit(shield, max_shield)
 		"SHIELD_REBOOT":
 			_shield_delay_reduction = 0.35 * rank
-			shield = minf(max_shield, shield + 3.0)
+			shield = minf(max_shield, shield + 3.0 * rank)
 			shield_changed.emit(shield, max_shield)
 		"VENT_COOLANT":
 			_vent_cooldown_reduction = 0.45 * rank
@@ -216,10 +241,37 @@ func get_status() -> Dictionary:
 		"max_heat": max_heat,
 		"vent_cooldown": vent_cooldown,
 		"vent_ready": vent_cooldown <= 0.0,
+		"guard": guard,
+		"blocking": blocking,
+		"boost_left": boost_left,
 	}
 
 
+func configure_chassis(id: String) -> void:
+	chassis = id
+	match id:
+		"BASTION":
+			max_hull = 145.0
+			max_shield = 55.0
+			move_speed = 235.0
+		"REDLINE":
+			max_hull = 75.0
+			max_shield = 20.0
+			move_speed = 345.0
+			vent_base_cooldown = 4.2
+		"CONDUCTOR":
+			max_hull = 90.0
+			max_shield = 40.0
+			heat_cooling_per_second = 18.0
+	hull = max_hull
+	shield = max_shield
+
+
 func _draw() -> void:
+	if blocking:
+		draw_arc(Vector2.ZERO, 34.0, -PI, PI, 40, CYAN, 4.0)
+	if boost_left > 0.0:
+		draw_circle(Vector2(-22.0, 0.0), 7.0, AMBER)
 	var hull_color := RED if is_dead else CYAN
 	var pulse := 1.0 + sin(Time.get_ticks_msec() * 0.008) * 0.05
 	var ship := PackedVector2Array([
@@ -228,6 +280,12 @@ func _draw() -> void:
 		Vector2(-7.0, 0.0),
 		Vector2(-12.0, 12.0),
 	])
+	if chassis == "BASTION":
+		ship = PackedVector2Array([Vector2(21, 0), Vector2(9, -18), Vector2(-16, -18), Vector2(-16, 18), Vector2(9, 18)])
+	elif chassis == "REDLINE":
+		ship = PackedVector2Array([Vector2(26, 0), Vector2(-18, -10), Vector2(-4, 0), Vector2(-18, 10)])
+	elif chassis == "CONDUCTOR":
+		ship = PackedVector2Array([Vector2(19, 0), Vector2(0, -18), Vector2(-18, 0), Vector2(0, 18)])
 	draw_colored_polygon(ship, Color(0.02, 0.10, 0.11, 0.95))
 	draw_polyline(ship + PackedVector2Array([ship[0]]), hull_color, 2.2, true)
 	draw_circle(Vector2.ZERO, 4.0, AMBER if get_heat_ratio() > 0.75 else CYAN)

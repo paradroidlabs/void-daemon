@@ -59,34 +59,52 @@ var _smoke_timer := 0.0
 var _capture_test := false
 var _capture_done := false
 var _capture_end_screen := false
+var _capture_pause := false
 var _smoke_finishing := false
 var _camera_tween: Tween
+var chassis := "COURIER"
+var _damage_window: Array[Dictionary] = []
+var _source_damage := {}
+var damage_taken := 0.0
+var damage_blocked := 0.0
+var _touch_block := false
+var _floating_count := 0
+var _primary_flash := 0.0
+var _arc_flash := 0.0
+var combat_view: SubViewportContainer
+var _mouse_precision_active := false
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
 	_parse_command_line()
+	get_window().title = "VOID//DAEMON | COURIER EXPERIMENT / 4ade"
 	run_seed = UpgradeCatalogScript.stable_hash(run_seed_text)
 	_build_world()
 	_connect_runtime()
 	_update_hud(true)
-	hud.flash_log("BOOT COMPLETE // MOVE: WASD OR TOUCH // VENT: SPACE", CYAN)
+	hud.flash_log("AUTO WEAPONS // M1 CHARGE + RELEASE // M2 GUARD // SHIFT BOOST // ESC STATS", CYAN)
 	if _capture_end_screen:
 		_start_end_screen_capture()
 	elif _smoke_test:
 		_start_smoke_test()
+	else:
+		hud.show_ship_picker()
 
 
 func _build_world() -> void:
+	combat_view = preload("res://src/ui/combat_view.gd").new()
+	combat_view.footer_height = 64
+	add_child(combat_view)
 	backdrop = ArenaBackdropScript.new()
 	backdrop.name = "ArenaBackdrop"
 	backdrop.z_index = -100
 	backdrop.configure(ARENA_BOUNDS, run_seed)
-	add_child(backdrop)
+	combat_view.arena.add_child(backdrop)
 
 	world_root = Node2D.new()
 	world_root.name = "RuntimeWorld"
-	add_child(world_root)
+	combat_view.arena.add_child(world_root)
 
 	player = PlayerShipScript.new()
 	player.name = "Courier"
@@ -104,6 +122,7 @@ func _build_world() -> void:
 	camera.limit_bottom = int(ARENA_BOUNDS.end.y)
 	camera.enabled = true
 	player.add_child(camera)
+	combat_view.attach_camera(camera)
 
 	weapon_controller = WeaponControllerScript.new()
 	weapon_controller.name = "WeaponController"
@@ -122,9 +141,14 @@ func _build_world() -> void:
 
 
 func _connect_runtime() -> void:
+	hud.zoom_requested.connect(combat_view.adjust_zoom)
 	player.vented.connect(_on_player_vented)
 	player.damaged.connect(_on_player_damaged)
 	player.died.connect(_on_player_died)
+	player.blocked.connect(func(amount: float):
+		damage_blocked += amount
+		hud.flash_log("GUARD // %.0f BLOCKED" % amount, CYAN)
+	)
 	weapon_controller.projectile_requested.connect(_spawn_projectile)
 	weapon_controller.arc_fired.connect(_show_arc)
 	weapon_controller.heat_generated.connect(player.add_heat)
@@ -136,6 +160,22 @@ func _connect_runtime() -> void:
 	hud.touch_move_changed.connect(_on_touch_move)
 	hud.touch_vent_pressed.connect(_try_vent)
 	hud.touch_target_bias.connect(_on_touch_target_bias)
+	hud.touch_block_changed.connect(func(active: bool): _touch_block = active)
+	hud.ship_selected.connect(_select_ship)
+	hud.pause_toggled.connect(func(paused: bool):
+		if paused:
+			weapon_controller.precision_charge = 0.0
+			weapon_controller._precision_was_held = false
+	)
+	weapon_controller.weapon_triggered.connect(func(weapon: String, hits: int):
+		if weapon == "FORK":
+			hud.pulse_fork()
+		elif weapon == "MASS_DRIVER" or weapon == "PRECISION":
+			_primary_flash = 0.18
+		else:
+			_arc_flash = 0.25
+			hud.flash_log("ARC // %d CONTACTS CHAINED" % hits, Color("9aa7ff"))
+	)
 
 
 func _physics_process(delta: float) -> void:
@@ -143,6 +183,10 @@ func _physics_process(delta: float) -> void:
 		return
 	_update_input_intents()
 	elapsed_time += delta
+	_primary_flash = maxf(0.0, _primary_flash - delta)
+	_arc_flash = maxf(0.0, _arc_flash - delta)
+	while not _damage_window.is_empty() and elapsed_time - float(_damage_window[0]["time"]) > 5.0:
+		_damage_window.pop_front()
 	spawn_timer -= delta
 	if not boss_spawned and elapsed_time >= BOSS_SPAWN_TIME:
 		_spawn_boss()
@@ -161,10 +205,27 @@ func _physics_process(delta: float) -> void:
 		_tick_smoke_test(delta)
 
 
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		_mouse_precision_active = false
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if not run_ended and not get_tree().paused:
+		if event is InputEventMouseButton and event.pressed:
+			if event.button_index == MOUSE_BUTTON_LEFT:
+				_mouse_precision_active = combat_view.contains_screen_point(event.position)
+			elif event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and combat_view.contains_screen_point(event.position):
+				combat_view.adjust_zoom(1 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1)
+				get_viewport().set_input_as_handled()
+				return
+		if event is InputEventKey and event.pressed and not event.echo and event.physical_keycode in [KEY_EQUAL, KEY_PLUS, KEY_MINUS, KEY_KP_ADD, KEY_KP_SUBTRACT]:
+			combat_view.adjust_zoom(-1 if event.physical_keycode in [KEY_MINUS, KEY_KP_SUBTRACT] else 1)
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.physical_keycode:
-			KEY_SPACE:
+			KEY_SHIFT:
 				_try_vent()
 			KEY_T:
 				_using_touch = not _using_touch
@@ -176,10 +237,8 @@ func _unhandled_input(event: InputEvent) -> void:
 					hud.flash_log("DEBUG // FAST-FORWARD TO WATCHDOG", MAGENTA)
 			KEY_ESCAPE, KEY_P:
 				hud.toggle_pause()
-	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
-		_try_vent()
 	if event is InputEventJoypadButton and event.pressed:
-		if event.button_index == JOY_BUTTON_A or event.button_index == JOY_BUTTON_RIGHT_SHOULDER:
+		if event.button_index == JOY_BUTTON_A:
 			_try_vent()
 		elif event.button_index == JOY_BUTTON_START:
 			hud.toggle_pause()
@@ -206,6 +265,11 @@ func _update_input_intents() -> void:
 	if movement.length_squared() <= 0.0:
 		movement = _touch_move
 	player.set_move_intent(movement)
+	player.blocking = (Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) or Input.is_physical_key_pressed(KEY_SPACE) or _touch_block) and not player.guard_broken
+	weapon_controller.attack_held = (_mouse_precision_active and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) or (_using_touch and _touch_aim_active) or (_smoke_test and fmod(_smoke_timer, 1.8) < 1.0)
+	if not joypads.is_empty():
+		player.blocking = (player.blocking or Input.is_joy_button_pressed(joypads[0], JOY_BUTTON_LEFT_SHOULDER)) and not player.guard_broken
+		weapon_controller.attack_held = weapon_controller.attack_held or Input.is_joy_button_pressed(joypads[0], JOY_BUTTON_RIGHT_SHOULDER)
 
 	var aim_direction := Vector2.RIGHT
 	var aim_active := false
@@ -222,7 +286,7 @@ func _update_input_intents() -> void:
 		aim_direction = _touch_aim
 		aim_active = true
 	elif not _using_touch and not OS.has_feature("mobile") and not aim_active:
-		var mouse_offset := get_global_mouse_position() - player.global_position
+		var mouse_offset: Vector2 = combat_view.screen_to_world(get_viewport().get_mouse_position()) - player.global_position
 		if mouse_offset.length() > 52.0:
 			aim_direction = mouse_offset.normalized()
 			aim_active = true
@@ -255,8 +319,7 @@ func _spawn_enemy() -> void:
 	var angle_roll := _seed_roll("spawn_angle", spawn_index)
 	var radius_roll := _seed_roll("spawn_radius", spawn_index)
 	var angle := TAU * float(angle_roll & 0xffff) / 65535.0
-	var radius := 520.0 + float(radius_roll & 0xff) / 255.0 * 180.0
-	var position := player.global_position + Vector2.RIGHT.rotated(angle) * radius
+	var position: Vector2 = combat_view.spawn_position(player.global_position, angle, float(radius_roll & 0xff) / 255.0, ARENA_BOUNDS)
 	position = Vector2(
 		clampf(position.x, ARENA_BOUNDS.position.x + 36.0, ARENA_BOUNDS.end.x - 36.0),
 		clampf(position.y, ARENA_BOUNDS.position.y + 36.0, ARENA_BOUNDS.end.y - 36.0)
@@ -281,6 +344,7 @@ func _spawn_enemy() -> void:
 	world_root.add_child(enemy)
 	enemy.add_to_group("enemy_normal")
 	enemy.died.connect(_on_enemy_died)
+	enemy.damaged.connect(_on_damage_dealt)
 	enemy.contact_hit.connect(_on_enemy_contact)
 	enemy.shot_requested.connect(_on_enemy_shot_requested)
 	spawn_index += 1
@@ -308,7 +372,6 @@ func _on_boss_shot_requested(origin: Vector2, direction: Vector2, stats: Diction
 
 func _on_projectile_hit(projectile: Area2D, target: Node, damage: float, hit_position: Vector2) -> void:
 	if projectile is Projectile and projectile.team == &"player":
-		damage_dealt += damage
 		weapon_controller.on_projectile_hit(projectile, target, hit_position, get_tree().get_nodes_in_group("enemies"))
 
 
@@ -423,7 +486,11 @@ func _apply_vent_pulse(position: Vector2, radius: float, damage: float, force: f
 		(enemy as Node2D).global_position += offset.normalized() * 18.0 * scale
 
 
-func _on_player_damaged(_amount: float, hull_damage: float) -> void:
+func _on_player_damaged(amount: float, hull_damage: float) -> void:
+	damage_taken += amount
+	hud.show_damage_feedback(amount, hull_damage)
+	_show_damage_number(player.global_position, amount, RED, "HULL" if hull_damage > 0.0 else "SHIELD")
+	_update_hud()
 	_show_ring(player.global_position, 48.0, RED, 0.16)
 	_shake_camera(11.0, 0.22)
 	if hull_damage > 0.0:
@@ -451,6 +518,7 @@ func _spawn_boss() -> void:
 	boss.configure(player, 1.0)
 	world_root.add_child(boss)
 	boss.died.connect(_on_boss_died)
+	boss.damaged.connect(_on_damage_dealt)
 	boss.shot_requested.connect(_on_boss_shot_requested)
 	boss.phase_changed.connect(_on_boss_phase_changed)
 	hud.flash_log("ROOT PROCESS DETECTED // WATCHDOG_01", MAGENTA)
@@ -485,6 +553,9 @@ func _end_run(victory: bool) -> void:
 		"kills": kills,
 		"level": level,
 		"damage": int(damage_dealt),
+		"damage_taken": int(damage_taken),
+		"damage_blocked": int(damage_blocked),
+		"chassis": chassis,
 		"seed": run_seed_text,
 		"build": " / ".join(build_parts) if not build_parts.is_empty() else "BASELINE",
 	})
@@ -498,13 +569,14 @@ func _restart_run() -> void:
 func _show_arc(points: PackedVector2Array, color: Color) -> void:
 	var line := Line2D.new()
 	line.points = points
-	line.width = 3.0
+	line.width = 1.5
 	line.default_color = color
 	line.antialiased = true
 	line.z_index = 30
 	world_root.add_child(line)
-	var tween := line.create_tween()
-	tween.tween_property(line, "modulate:a", 0.0, 0.16)
+	line.process_mode = Node.PROCESS_MODE_ALWAYS
+	var tween := line.create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS)
+	tween.tween_property(line, "modulate:a", 0.0, 0.09)
 	tween.tween_callback(line.queue_free)
 
 
@@ -521,7 +593,8 @@ func _show_ring(position: Vector2, radius: float, color: Color, duration: float)
 	ring.scale = Vector2.ONE * 0.15
 	ring.z_index = 28
 	world_root.add_child(ring)
-	var tween := ring.create_tween().set_parallel(true)
+	ring.process_mode = Node.PROCESS_MODE_ALWAYS
+	var tween := ring.create_tween().set_pause_mode(Tween.TWEEN_PAUSE_PROCESS).set_parallel(true)
 	tween.tween_property(ring, "scale", Vector2.ONE, duration)
 	tween.tween_property(ring, "modulate:a", 0.0, duration)
 	tween.chain().tween_callback(ring.queue_free)
@@ -562,10 +635,95 @@ func _update_hud(force: bool = false) -> void:
 		"vent_ready": state["vent_ready"],
 		"vent_cooldown": state["vent_cooldown"],
 		"fps": Engine.get_frames_per_second(),
+		"chassis": chassis,
+		"zoom": combat_view.zoom_level,
 	}
 	if force:
 		status["message"] = "SIGNAL LOCKED"
 	hud.set_status(status)
+	hud.set_combat_status("DPS %.1f [5s]  //  %s" % [_get_dps(), chassis],
+		"AUTO DRIVER %s  |  AUTO ARC %s  |  GUARD %.0f  |  SHIFT BOOST %s" % [
+			"FIRING" if _primary_flash > 0.0 else "READY", "CHAINING" if _arc_flash > 0.0 else ("READY" if weapon_controller._arc_cooldown <= 0.0 else "%.1fs" % weapon_controller._arc_cooldown),
+			player.guard, "READY" if player.vent_cooldown <= 0.0 else "%.1fs" % player.vent_cooldown])
+	hud.set_inspection_data(_get_inspection_data())
+	hud.set_ship_diagram(upgrades, weapon_controller.precision_charge, _primary_flash, _arc_flash, chassis)
+
+
+func _get_dps() -> float:
+	var total := 0.0
+	for sample in _damage_window:
+		total += float(sample["amount"])
+	return total / minf(5.0, maxf(elapsed_time, 0.1))
+
+
+func _on_damage_dealt(_target: Node, amount: float, source: StringName, position: Vector2) -> void:
+	damage_dealt += amount
+	_source_damage[source] = float(_source_damage.get(source, 0.0)) + amount
+	_damage_window.append({"time": elapsed_time, "amount": amount})
+	_show_damage_number(position, amount, Color("9aa7ff") if source == &"ARC_EXE" else CYAN)
+
+
+func _show_damage_number(position: Vector2, amount: float, color: Color, prefix: String = "") -> void:
+	if _floating_count >= 40:
+		return
+	_floating_count += 1
+	var label := Label.new()
+	label.text = "%s %s" % [prefix, "%.1f" % amount if amount < 1.0 else "%.0f" % amount]
+	label.add_theme_color_override("font_color", color)
+	label.add_theme_font_size_override("font_size", 17)
+	label.position = position + Vector2(-12, -24)
+	label.z_index = 45
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	world_root.add_child(label)
+	var tween := label.create_tween().set_parallel(true)
+	tween.tween_property(label, "position:y", label.position.y - 35.0, 0.55)
+	tween.tween_property(label, "modulate:a", 0.0, 0.55)
+	tween.chain().tween_callback(func():
+		_floating_count -= 1
+		label.queue_free()
+	)
+
+
+func _get_inspection_data() -> Dictionary:
+	var sources: Array = []
+	for source in _source_damage:
+		sources.append([String(source).replace("_", " "), "%.0f  /  %.1f%%" % [_source_damage[source], 100.0 * float(_source_damage[source]) / maxf(1, damage_dealt)]])
+	if sources.is_empty():
+		sources.append(["NO HITS YET", "0"])
+	var installed: Array = []
+	for id in upgrades:
+		var definition: Dictionary = UpgradeCatalogScript.get_definition(StringName(id))
+		installed.append([String(id).replace("_", " "), "RANK %d" % upgrades[id], definition.get("description", "")])
+	return {
+		"chassis": chassis, "seed": run_seed_text, "level": level, "mods": upgrades.duplicate(),
+		"meters": [["HULL", roundi(player.hull), roundi(player.max_hull), "ff6675"], ["SHIELD", roundi(player.shield), roundi(player.max_shield), "59f2ff"], ["GUARD", roundi(player.guard), 100, "9aa7ff"], ["HEAT", roundi(player.heat), roundi(player.max_heat), "ffbd4a"]],
+		"summary": [["ROLLING DPS", "%.1f" % _get_dps(), "Actual damage / last 5 seconds"], ["RUN TIME", "%02d:%02d" % [int(elapsed_time) / 60, int(elapsed_time) % 60], "%d enemies purged" % kills], ["BUILD PROGRESS", "LEVEL %d" % level, "%d / %d XP to next upgrade" % [xp, xp_needed]]],
+		"weapons": [
+			["MASS DRIVER / AUTO", "%.0f DMG / %.2fs" % [weapon_controller.primary_damage, weapon_controller.primary_interval], "%d pierce. Mouse / right touch pad biases targeting. Fires without holding attack." % (1 + int(upgrades.get("DRIVER_RAIL", 0)))],
+			["ARC / AUTO", "%.0f DMG / %.2fs" % [weapon_controller.arc_damage, weapon_controller.arc_interval], "Nearest target within 260 units. Up to %d hits / chain; 140-unit jumps. Independent of Driver." % (3 + int(upgrades.get("CONDUCTIVE_MARK", 0)))],
+			["PRECISION / MANUAL", "1.2x - 4x DRIVER", "Hold M1 for up to 0.9s, release to fire. 2-6 extra pierce; 8-20 heat. Guard cancels charging."],
+			["CHILD PROCESSES / ON KILL", "%d CHILD SHOTS" % int(upgrades.get("FORK_ON_KILL", 0)), "Lethal Driver / Precision hits send children toward nearby enemies. 45% parent damage. Children never fork again."]],
+		"sources": sources, "upgrade_cards": installed,
+		"stat_groups": [
+			["COMBAT RECORD", [["Total damage dealt", "%.0f" % damage_dealt], ["Damage taken", "%.0f" % damage_taken], ["Damage prevented by guard", "%.0f" % damage_blocked], ["Kills", str(kills)], ["Rolling DPS (5s)", "%.1f" % _get_dps()]]],
+			["MOBILITY + THERMALS", [["Move speed", "%.0f units/s" % player.move_speed], ["Cooling", "%.1f heat/s" % player.heat_cooling_per_second], ["Vent cooldown remaining", "%.1fs" % player.vent_cooldown], ["Effective vent cooldown", "%.1fs" % maxf(1.7, player.vent_base_cooldown - player._vent_cooldown_reduction)], ["Cadence multiplier", "x%.2f" % (1.0 + 0.1 * int(upgrades.get("OVERCLOCK_KERNEL", 0)))], ["Heat throttle", "x%.2f" % player.get_throttle_scale()]]],
+			["DEFENSE", [["Shield regeneration", "%.1f/s" % player.shield_regen_rate], ["Shield regen delay", "%.1fs" % maxf(0.8, player.shield_regen_delay - player._shield_delay_reduction)], ["Hit grace", "%.2fs" % (player.collision_grace + player._extra_collision_grace)], ["Guard mitigation", "80% / 55% movement speed"], ["Guard drain / regeneration", "38/s / 24/s"]]]]
+	}
+
+
+func _select_ship(id: String) -> void:
+	chassis = id
+	player.configure_chassis(id)
+	if id == "BASTION":
+		weapon_controller.primary_damage = 32.0
+		weapon_controller.primary_interval = 0.9
+	elif id == "REDLINE":
+		weapon_controller.primary_damage = 18.0
+		weapon_controller.primary_interval = 0.5
+	elif id == "CONDUCTOR":
+		weapon_controller.arc_damage = 18.0
+		weapon_controller.arc_interval = 0.9
+	_update_hud()
 
 
 func _on_touch_move(direction: Vector2) -> void:
@@ -593,6 +751,10 @@ func _parse_command_line() -> void:
 			_capture_test = true
 		elif argument == "--capture-end-screen":
 			_capture_end_screen = true
+		elif argument == "--capture-pause":
+			_capture_pause = true
+			_capture_test = true
+			_smoke_test = true
 	if run_seed_text.is_empty():
 		run_seed_text = "VOID-0001"
 	if _capture_end_screen:
@@ -743,6 +905,9 @@ func _tick_smoke_test(delta: float) -> void:
 	player.set_move_intent(Vector2(0.7, 0.2))
 	if _capture_test and not _capture_done and _smoke_timer >= 3.8:
 		_capture_done = true
+		if _capture_pause:
+			_capture_pause_screen()
+			return
 		var viewport_texture := get_viewport().get_texture()
 		if viewport_texture == null:
 			print("CAPTURE_SKIP renderer_has_no_viewport_texture")
@@ -765,3 +930,29 @@ func _tick_smoke_test(delta: float) -> void:
 		])
 		synth_audio.shutdown()
 		_smoke_finishing = true
+
+
+func _capture_pause_screen() -> void:
+	_update_hud()
+	hud.toggle_pause(true)
+	await get_tree().create_timer(0.5, true).timeout
+	await RenderingServer.frame_post_draw
+	var image := get_viewport().get_texture().get_image()
+	image.save_png(ProjectSettings.globalize_path("res://artifacts/pause_review.png"))
+	var dashboard: TabContainer = hud.get("_pause_dashboard")
+	for index in range(1, 4):
+		dashboard.current_tab = index
+		await get_tree().create_timer(0.15, true).timeout
+		await RenderingServer.frame_post_draw
+		get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://artifacts/pause_tab_%d.png" % index))
+	dashboard.current_tab = 0
+	get_window().content_scale_size = Vector2i(640, 720)
+	get_window().size = Vector2i(640, 720)
+	hud.toggle_pause(false)
+	hud.toggle_pause(true)
+	await get_tree().create_timer(0.3, true).timeout
+	await RenderingServer.frame_post_draw
+	get_viewport().get_texture().get_image().save_png(ProjectSettings.globalize_path("res://artifacts/pause_compact.png"))
+	synth_audio.shutdown()
+	await get_tree().create_timer(0.2, true).timeout
+	get_tree().quit()

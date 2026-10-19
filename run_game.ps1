@@ -5,6 +5,12 @@ param(
 
 $projectRoot = $PSScriptRoot
 $localGodot = Join-Path $projectRoot ".tools\godot\Godot_v4.7.1-stable_win64.exe"
+if (-not (Test-Path -LiteralPath $localGodot)) {
+    $commonGitDirectory = git -C $projectRoot rev-parse --path-format=absolute --git-common-dir 2>$null
+    if ($LASTEXITCODE -eq 0 -and $commonGitDirectory) {
+        $localGodot = Join-Path (Split-Path $commonGitDirectory -Parent) ".tools\godot\Godot_v4.7.1-stable_win64.exe"
+    }
+}
 
 if (Test-Path -LiteralPath $localGodot) {
     $godotExe = $localGodot

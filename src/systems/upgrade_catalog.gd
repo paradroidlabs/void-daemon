@@ -60,7 +60,7 @@ const _DEFINITIONS: Array[Dictionary] = [
 	{
 		"id": "CONDUCTIVE_MARK",
 		"title": "CONDUCTIVE_MARK",
-		"description": "ARC.EXE marks its final contact. The next discharge may begin from that contact and gains one extra jump per rank.",
+		"description": "ARC.EXE prioritizes its last surviving contact while it stays within 260 units. Each rank adds one chain hit.",
 		"max_rank": 3,
 		"category": "patch",
 		"target": "ARC.EXE",
@@ -112,7 +112,7 @@ const _DEFINITIONS: Array[Dictionary] = [
 	{
 		"id": "KINETIC_DAMPERS",
 		"title": "KINETIC_DAMPERS",
-		"description": "After taking hull damage, extend collision grace and briefly increase thrust away from nearby contacts.",
+		"description": "After taking damage, extend collision grace by 0.12s per rank and briefly thrust away from the hit.",
 		"max_rank": 2,
 		"category": "system",
 		"target": "HULL",
@@ -138,7 +138,7 @@ const _DEFINITIONS: Array[Dictionary] = [
 	{
 		"id": "SHIELD_REBOOT",
 		"title": "SHIELD_REBOOT",
-		"description": "Shield regeneration restarts sooner after damage and begins with a short burst of recovery.",
+		"description": "Shield regeneration restarts 0.35s sooner per rank. Installing restores 3 shield per current rank.",
 		"max_rank": 3,
 		"category": "system",
 		"target": "SHIELD",
@@ -164,7 +164,7 @@ const _DEFINITIONS: Array[Dictionary] = [
 	{
 		"id": "VENT_COOLANT",
 		"title": "VENT_COOLANT",
-		"description": "Shorten VENT cooldown, but reduce the heat retained after venting for heat-threshold effects.",
+		"description": "Shorten VENT + boost cooldown by 0.45s per rank. VENT always clears all heat.",
 		"max_rank": 3,
 		"category": "system",
 		"target": "VENT",
