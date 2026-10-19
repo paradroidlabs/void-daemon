@@ -14,6 +14,10 @@ On a fresh clone, install Godot 4.7.1 and open `project.godot`; the portable eng
 
 ## Run it
 
+For a standalone Windows executable and the full desktop test checklist, see [Desktop playtest](DESKTOP_PLAYTEST.md). Source branch: `prototype/graviton-salvo-checkpoint`. The default `master` branch is the older demo; it is not the current combat experiment.
+
+[Download the Windows desktop playtest](https://github.com/paradroidlabs/void-daemon/releases/tag/desktop-2026.10.19.1) — extract the ZIP, then open `VOID-DAEMON.exe` for survival or `Play Combat Lab.cmd` for the repeatable lab. No Godot installation is needed to play.
+
 On Windows, the execution-policy-free launcher is:
 
 ```text
@@ -129,6 +133,11 @@ The run-report regression test also checks exact damage across all five sources,
 The Graviton checks additionally compare real clustering against a no-field control, verify splash/heat/cancellation/touch input, and run a complete mouse-input sequence that observes missile damage followed by ARC damage. Physical phone/controller validation and human fun judgement remain playtest work.
 
 ## Screenshots
+
+### Actual desktop playtest — Boss + Full Chain
+![Desktop boss victory scorecard: nine enemies purged and 2,500 actual damage](artifacts/desktop_boss_victory.png)
+
+User-supplied combat-lab clear. This is actual desktop play evidence, not a full survival-run completion or a performance certification.
 
 ### Current Graviton kit and scorecard
 ![Charged salvo and automatic follow-through](artifacts/graviton_followthrough.png)

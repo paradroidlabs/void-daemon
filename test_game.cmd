@@ -9,6 +9,8 @@ if not exist "%GODOT_EXE%" (
 )
 "%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --editor --quit
 if errorlevel 1 exit /b %errorlevel%
+"%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\boss-health-bar-test.log" --script res://tests/boss_health_bar_test.gd
+if errorlevel 1 exit /b %errorlevel%
 "%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\smoke-ci.log" -- --smoke-test --seed=AUTOMATED-TEST
 if errorlevel 1 exit /b %errorlevel%
 "%GODOT_EXE%" --headless --path "%PROJECT_ROOT%" --log-file "%PROJECT_ROOT%\.godot\run-report-test.log" --script res://tests/run_report_test.gd

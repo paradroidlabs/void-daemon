@@ -10,6 +10,7 @@ const MAGENTA := Color("ff4fd8")
 const RED := Color("ff496c")
 const AMBER := Color("ffbd4a")
 const DARK := Color("190b1b")
+const HealthBarScript := preload("res://src/ui/boss_health_bar.gd")
 
 var target: Node2D
 var max_health: float = 1500.0
@@ -50,6 +51,9 @@ func _ready() -> void:
 	collision.shape = circle
 	add_child(collision)
 	z_index = 12
+	var health_bar := HealthBarScript.new()
+	health_bar.name = "HealthBar"
+	add_child(health_bar)
 	queue_redraw()
 
 
@@ -178,7 +182,3 @@ func _draw() -> void:
 	if _telegraph_left > 0.0 and is_instance_valid(target):
 		var local_target := to_local(target.global_position)
 		draw_line(Vector2.ZERO, local_target.limit_length(420.0), Color(AMBER, 0.75), 2.0)
-	var bar_rect := Rect2(-52.0, -70.0, 104.0, 7.0)
-	draw_rect(bar_rect, Color(0.08, 0.02, 0.08, 0.92), true)
-	draw_rect(Rect2(bar_rect.position + Vector2.ONE, Vector2((bar_rect.size.x - 2.0) * get_health_ratio(), bar_rect.size.y - 2.0)), MAGENTA, true)
-	draw_rect(bar_rect, Color(MAGENTA, 0.72), false, 1.0)

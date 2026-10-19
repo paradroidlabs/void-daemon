@@ -82,6 +82,7 @@ var _camera_tween: Tween
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_PAUSABLE
 	_parse_command_line()
+	DisplayServer.window_set_title("VOID//DAEMON | %s | %s" % [ProjectSettings.get_setting("application/config/version", "prototype"), "COMBAT LAB" if _combat_lab else ("SURVIVAL" if _combo_mode else "CLASSIC")])
 	run_seed = UpgradeCatalogScript.stable_hash(run_seed_text)
 	_build_world()
 	_connect_runtime()

@@ -14,6 +14,8 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+& $consoleGodot --headless --path $projectRoot --log-file (Join-Path $projectRoot '.godot\boss-health-bar-test.log') --script res://tests/boss_health_bar_test.gd
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $consoleGodot --headless --path $projectRoot --log-file (Join-Path $projectRoot '.godot\smoke-ci.log') -- --smoke-test --seed=AUTOMATED-TEST
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
