@@ -21,6 +21,7 @@ signal lab_fixture_requested(value: String)
 signal lab_loadout_requested(value: String)
 signal lab_reset_requested
 signal lab_report_requested
+signal live_stats_requested
 
 const CYAN := Color(0.35, 0.95, 1.0, 1.0)
 const CYAN_DIM := Color(0.13, 0.50, 0.55, 1.0)
@@ -66,10 +67,11 @@ var _end_tabs: HBoxContainer
 var _end_tab_buttons: Array[Button] = []
 var _end_footer: Label
 var _end_report: Dictionary = {}
+var _live_report := false
 var _restart_button: Button
 var _menu_button: Button
 var _pause_overlay: ColorRect
-var _pause_center: CenterContainer
+var _pause_center: Control
 var _pause_panel: PanelContainer
 var _resume_button: Button
 var _pause_restart_button: Button
@@ -260,6 +262,12 @@ func hide_upgrade_choices() -> void:
 ## Displays a paused run summary. Pressing/tapping the button or R emits
 ## restart_requested after restoring the SceneTree's previous pause state.
 func show_end_screen(victory: bool, stats: Dictionary) -> void:
+	_live_report = false
+	_is_paused = false
+	_pause_overlay.hide()
+	_restart_button.text = "RESTART PROCESS  [R]"
+	_menu_button.text = "HANGAR / CHANGE SHIP"
+	_end_footer.text = "FLIGHT RECORDER  /  RETRY THE SAME SEED"
 	_upgrade_overlay.visible = false
 	_clear_upgrade_buttons()
 	_end_overlay.visible = true
@@ -270,6 +278,39 @@ func show_end_screen(victory: bool, stats: Dictionary) -> void:
 	_set_end_page(0)
 	_layout_end_screen()
 	call_deferred("_focus_restart")
+
+
+## Uses the same complete scorecard without terminating or resetting the run.
+func show_live_stats(stats: Dictionary) -> void:
+	_live_report = true
+	_pause_overlay.hide()
+	_end_report = stats.duplicate(true)
+	_end_report["scorecard"]["in_progress"] = true
+	_end_card.set_report(false, _end_report)
+	_restart_button.text = "RESUME  [ESC / P]"
+	_menu_button.text = "PAUSE OPTIONS"
+	_end_footer.text = "SNAPSHOT  /  RUN PRESERVED"
+	_end_overlay.show()
+	_set_end_page(0)
+	_layout_end_screen()
+	call_deferred("_focus_restart")
+
+
+func _scorecard_action() -> void:
+	if _live_report:
+		toggle_pause(false)
+	else:
+		_on_restart_pressed()
+
+
+func _scorecard_options() -> void:
+	if _live_report:
+		_end_overlay.hide()
+		_pause_overlay.show()
+		_resume_button.grab_focus()
+	else:
+		_end_modal()
+		menu_requested.emit()
 
 
 ## Shows a short, non-blocking message above the lower edge of the screen.
@@ -306,7 +347,7 @@ func set_combo_mode(enabled: bool, lab: bool = false) -> void:
 
 
 func set_lab_selection(fixture: String, loadout: String) -> void:
-	_fixture_picker.select(maxi(0, ["cluster", "dispersed", "boss", "orbit"].find(fixture)))
+	_fixture_picker.select(maxi(0, ["cluster", "dispersed", "boss", "orbit", "substrate"].find(fixture)))
 	_loadout_picker.select(maxi(0, ["salvo", "gravity", "chain"].find(loadout)))
 
 
@@ -384,9 +425,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if _end_overlay.visible:
+		if _live_report:
+			if event is InputEventKey and event.pressed and not event.echo and event.keycode in [KEY_ESCAPE, KEY_P]:
+				get_viewport().set_input_as_handled()
+				toggle_pause(false)
+				return
+			if event is InputEventJoypadButton and event.pressed and event.button_index in [JOY_BUTTON_START, JOY_BUTTON_B]:
+				get_viewport().set_input_as_handled()
+				toggle_pause(false)
+				return
 		if event is InputEventKey:
 			var key_event := event as InputEventKey
-			if key_event.pressed and not key_event.echo and key_event.keycode == KEY_R:
+			if not _live_report and key_event.pressed and not key_event.echo and key_event.keycode == KEY_R:
 				get_viewport().set_input_as_handled()
 				_on_restart_pressed()
 			elif key_event.pressed and not key_event.echo and _end_tabs.visible:
@@ -622,9 +672,9 @@ func _build_combo_controls() -> void:
 	_lab_bar.add_theme_constant_override("separation", 8)
 	_root.add_child(_lab_bar)
 	_fixture_picker = OptionButton.new()
-	for caption in ["CLUSTER [F1]", "DISPERSED [F2]", "BOSS LANE [F3]", "ORBIT FIELD [F8]"]:
+	for caption in ["CLUSTER [F1]", "DISPERSED [F2]", "BOSS LANE [F3]", "ORBIT FIELD [F8]", "SUBSTRATE [F9]"]:
 		_fixture_picker.add_item(caption)
-	_fixture_picker.item_selected.connect(func(index: int): lab_fixture_requested.emit(["cluster", "dispersed", "boss", "orbit"][index]))
+	_fixture_picker.item_selected.connect(func(index: int): lab_fixture_requested.emit(["cluster", "dispersed", "boss", "orbit", "substrate"][index]))
 	_lab_bar.add_child(_fixture_picker)
 	_loadout_picker = OptionButton.new()
 	for caption in ["SALVO ONLY [F4]", "GRAVITON + SALVO [F5]", "FULL CHAIN [F6]"]:
@@ -700,9 +750,9 @@ func _build_end_overlay() -> void:
 	_end_tabs = HBoxContainer.new()
 	_end_tabs.add_theme_constant_override("separation", 6)
 	_end_panel.add_child(_end_tabs)
-	for index in range(5):
+	for index in range(7):
 		var tab := Button.new()
-		tab.text = ["RUN", "ARSENAL", "SYSTEMS", "BUILD", "KIT"][index]
+		tab.text = ["RUN", "ARSENAL", "SYSTEMS", "BUILD", "KIT", "MIND", "MAP"][index]
 		tab.toggle_mode = true
 		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		tab.add_theme_font_size_override("font_size", 11)
@@ -721,16 +771,16 @@ func _build_end_overlay() -> void:
 	_restart_button.add_theme_stylebox_override("focus", _make_box(TRANSPARENT, CYAN, 1, 8))
 	_restart_button.focus_mode = Control.FOCUS_ALL
 	_restart_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	_restart_button.pressed.connect(_on_restart_pressed)
+	_restart_button.pressed.connect(_scorecard_action)
 	_end_panel.add_child(_restart_button)
 	_menu_button = Button.new()
 	_menu_button.text = "HANGAR / CHANGE SHIP"
-	_menu_button.pressed.connect(func(): _end_modal(); menu_requested.emit())
+	_menu_button.pressed.connect(_scorecard_options)
 	_end_panel.add_child(_menu_button)
 
 
 func _set_end_page(index: int) -> void:
-	_end_card.page = clampi(index, 0, 4)
+	_end_card.page = clampi(index, 0, 6)
 	_end_card.queue_redraw()
 	for i in _end_tab_buttons.size():
 		_end_tab_buttons[i].set_pressed_no_signal(i == _end_card.page)
@@ -746,26 +796,30 @@ func _build_pause_overlay() -> void:
 	_pause_overlay.visible = false
 	_root.add_child(_pause_overlay)
 
-	_pause_center = CenterContainer.new()
-	_pause_center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_pause_center = Control.new()
+	_pause_center.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
 	_pause_overlay.add_child(_pause_center)
 
 	_pause_panel = PanelContainer.new()
-	_pause_panel.custom_minimum_size = Vector2(460.0, 280.0)
+	_pause_panel.custom_minimum_size = Vector2(460.0, 460.0)
 	_pause_panel.add_theme_stylebox_override("panel", _make_box(Color(0.01, 0.035, 0.045, 0.99), CYAN, 2, 24.0))
 	_pause_center.add_child(_pause_panel)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_pause_panel.add_child(scroll)
 
 	var rows := VBoxContainer.new()
 	rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	rows.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	rows.add_theme_constant_override("separation", 14)
-	_pause_panel.add_child(rows)
+	scroll.add_child(rows)
 
-	var title := _new_label("PROCESS SUSPENDED", 26, AMBER)
+	var title := _new_label("PAUSED / OPERATIONS", 21, AMBER)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rows.add_child(title)
 
-	var prompt := _new_label("// SYSTEM STANDBY // SELECT OPERATION", 13, CYAN_DIM)
+	var prompt := _new_label("RUN PRESERVED / SELECT OPERATION", 11, CYAN_DIM)
+	prompt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	rows.add_child(prompt)
 
@@ -773,7 +827,7 @@ func _build_pause_overlay() -> void:
 
 	_resume_button = Button.new()
 	_resume_button.name = "ResumeButton"
-	_resume_button.text = "RESUME PROCESS  [ESC / P]"
+	_resume_button.text = "RESUME  [ESC / P]"
 	_resume_button.custom_minimum_size = Vector2(0.0, 48.0)
 	_resume_button.focus_mode = Control.FOCUS_ALL
 	_resume_button.add_theme_font_size_override("font_size", 16)
@@ -784,6 +838,21 @@ func _build_pause_overlay() -> void:
 	_resume_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_resume_button.pressed.connect(func(): toggle_pause(false))
 	rows.add_child(_resume_button)
+	var stats_button := Button.new()
+	stats_button.name = "LiveStatsButton"
+	stats_button.text = "FLIGHT RECORDER / STATS"
+	stats_button.custom_minimum_size.y = 44
+	stats_button.pressed.connect(func(): live_stats_requested.emit())
+	rows.add_child(stats_button)
+	var settings_button := Button.new()
+	settings_button.text = "AUDIO / ACCESSIBILITY"
+	settings_button.custom_minimum_size.y = 44
+	rows.add_child(settings_button)
+	var settings := Experience.create_controls(true)
+	settings.name = "PauseSettings"
+	settings.hide()
+	settings_button.pressed.connect(func(): settings.visible = not settings.visible)
+	rows.add_child(settings)
 
 	_pause_restart_button = Button.new()
 	_pause_restart_button.name = "PauseRestartButton"
@@ -802,7 +871,7 @@ func _build_pause_overlay() -> void:
 	)
 	rows.add_child(_pause_restart_button)
 	var hangar := Button.new()
-	hangar.text = "HANGAR / CHANGE SHIP / SETTINGS"
+	hangar.text = "HANGAR / CHANGE SHIP"
 	hangar.custom_minimum_size.y = 44
 	hangar.pressed.connect(func(): toggle_pause(false); menu_requested.emit())
 	rows.add_child(hangar)
@@ -820,22 +889,26 @@ func _build_pause_overlay() -> void:
 	_quit_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_quit_button.pressed.connect(func(): get_tree().quit())
 	rows.add_child(_quit_button)
+	for button: Button in _pause_panel.find_children("*", "Button", true, false):
+		button.clip_text = true
 
 
 ## Opens or closes the pause overlay and toggles scene tree pause.
 func toggle_pause(force_state = null) -> void:
-	if _upgrade_overlay.visible or _end_overlay.visible:
+	if _upgrade_overlay.visible or (_end_overlay.visible and not _live_report):
 		return
 	if force_state != null:
 		_is_paused = bool(force_state)
 	else:
 		_is_paused = not _is_paused
 
-	_pause_overlay.visible = _is_paused
 	if _is_paused:
 		_begin_modal()
-		_resume_button.grab_focus()
+		live_stats_requested.emit()
 	else:
+		_pause_overlay.hide()
+		_end_overlay.hide()
+		_live_report = false
 		_end_modal()
 	pause_toggled.emit(_is_paused)
 
@@ -946,6 +1019,7 @@ func _layout_touch_controls() -> void:
 		return
 	var viewport_size := get_viewport().get_visible_rect().size
 	var safe_rect := _get_safe_viewport_rect()
+	_layout_pause_options()
 	var safe_left := safe_rect.position.x
 	var safe_top := safe_rect.position.y
 	var safe_right := viewport_size.x - safe_rect.end.x
@@ -971,6 +1045,28 @@ func _layout_touch_controls() -> void:
 	_zoom_label.position = Vector2(viewport_size.x - 112, viewport_size.y - 24)
 
 
+func _modal_ui_scale() -> float:
+	var window_size := Vector2(DisplayServer.window_get_size())
+	if DisplayServer.get_name() != "headless" and window_size.x > 0 and window_size.y > 0:
+		var viewport_size := get_viewport().get_visible_rect().size
+		return maxf(1.0, minf(viewport_size.x / window_size.x, viewport_size.y / window_size.y))
+	return 1.0
+
+
+func _layout_pause_options() -> void:
+	if not is_instance_valid(_pause_panel):
+		return
+	var safe_rect := _get_safe_viewport_rect()
+	var ui_scale := _modal_ui_scale()
+	_pause_center.scale = Vector2.ONE * ui_scale
+	_pause_center.position = safe_rect.position
+	_pause_center.size = safe_rect.size / ui_scale
+	var desired := Vector2(minf(460, maxf(1, safe_rect.size.x / ui_scale - 32)), minf(460, maxf(1, safe_rect.size.y / ui_scale - 32)))
+	_pause_panel.custom_minimum_size = desired
+	_pause_panel.size = desired
+	_pause_panel.position = (_pause_center.size - desired) * 0.5
+
+
 func _layout_end_screen() -> void:
 	if not is_instance_valid(_end_panel):
 		return
@@ -983,22 +1079,23 @@ func _layout_end_screen() -> void:
 
 	# canvas_items retains a large logical viewport in small windows. Counter
 	# its downscale so page selection and 44px targets use the displayed size.
-	var ui_scale := 1.0
-	var window_size := Vector2(DisplayServer.window_get_size())
-	if DisplayServer.get_name() != "headless" and window_size.x > 0 and window_size.y > 0:
-		var viewport_size := get_viewport().get_visible_rect().size
-		ui_scale = maxf(1.0, minf(viewport_size.x / window_size.x, viewport_size.y / window_size.y))
+	var ui_scale := _modal_ui_scale()
 	_end_panel.scale = Vector2.ONE * ui_scale
 	_end_panel.size = Vector2(minf(END_PANEL_MAX_WIDTH, available_size.x / ui_scale), available_size.y / ui_scale)
 	_end_panel.position = safe_rect.position + (safe_rect.size - _end_panel.size * ui_scale) * 0.5
 	var panel_size := _end_panel.size
 	var compact := panel_size.x < 940 or panel_size.y - 58 < 530
-	_end_tabs.visible = compact
+	var has_substrate: bool = not _end_card.data.get("substrate", {}).is_empty()
+	var has_map: bool = not _end_card.data.get("sector_map", {}).is_empty()
+	var pages := compact or has_substrate or has_map
+	_end_tabs.visible = pages
 	_end_tab_buttons[4].visible = not _end_card.data.get("combo", {}).is_empty()
+	_end_tab_buttons[5].visible = has_substrate
+	_end_tab_buttons[6].visible = has_map
 	for index in _end_tab_buttons.size():
-		_end_tab_buttons[index].text = (["RUN", "GUNS", "SHIP", "BUILD", "KIT"] if panel_size.x < 420 else ["RUN", "ARSENAL", "SYSTEMS", "BUILD", "KIT"])[index]
+		_end_tab_buttons[index].text = (["RUN", "GUNS", "SHIP", "BUILD", "KIT", "MIND", "MAP"] if panel_size.x < 420 else ["RUN", "ARSENAL", "SYSTEMS", "BUILD", "KIT", "MIND", "MAP"])[index]
 	_end_card.position = Vector2.ZERO
-	_end_card.size = Vector2(panel_size.x, panel_size.y - (106 if compact else 58))
+	_end_card.size = Vector2(panel_size.x, panel_size.y - (106 if pages else 58))
 	_end_tabs.position = Vector2(0, panel_size.y - 98)
 	_end_tabs.size = Vector2(panel_size.x, 44)
 	_restart_button.position = Vector2(maxf(0, panel_size.x - 300), panel_size.y - 44)

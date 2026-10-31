@@ -103,7 +103,7 @@ func _run() -> void:
 	check(not get_nodes_in_group("projectile_enemy").is_empty(), "Boss/ranged fixture actually attacks")
 	check(boss_shots[0] > 0, "The boss itself emits its attack pattern")
 	game.hud.lab_report_requested.emit()
-	check(paused and game.run_ended and game.hud._end_overlay.visible, "Lab report pauses and opens the actual scorecard")
+	check(paused and not game.run_ended and game.hud._end_overlay.visible, "Lab report inspects without ending the encounter")
 	check(not game.hud._end_report["scorecard"]["combo"].is_empty(), "Report contains the live kit telemetry")
 	for dimensions in [Vector2i(640, 360), Vector2i(360, 640)]:
 		root.content_scale_size = Vector2i.ZERO
@@ -115,7 +115,7 @@ func _run() -> void:
 		check(game.hud._end_card.page == 4, "Compact kit telemetry page is selectable")
 		check(game.hud._end_tabs.get_global_rect().end.x <= dimensions.x and game.hud._restart_button.get_global_rect().end.y <= dimensions.y, "Five compact tabs and restart fit the viewport")
 	game.hud._restart_button.pressed.emit()
-	check(not paused and not game.run_ended and game._lab_fixture == "boss", "Report restart returns to the selected encounter")
+	check(not paused and not game.run_ended and game._lab_fixture == "boss", "Report resume preserves the selected encounter")
 	game.synth_audio.shutdown()
 	game.queue_free()
 	await process_frame

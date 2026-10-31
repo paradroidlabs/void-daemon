@@ -35,7 +35,7 @@ func _ready() -> void:
 
 
 func set_charge(active: bool, ratio: float = 0.0, chassis: String = "graviton") -> void:
-	if not is_instance_valid(_charge_player):
+	if not enabled or not is_instance_valid(_charge_player) or _loops.is_empty():
 		return
 	if chassis != _kit_id:
 		_charge_player.stop()
@@ -56,7 +56,8 @@ func update_flight(ship: PlayerShip, _chassis: String, hive_active: bool) -> voi
 	_mix_duck = 5.0 if hive_active else 0.0
 	_thrust_player.pitch_scale = 0.8 + minf(1, ship.velocity.length() / ship.move_speed) * 0.35
 	_thrust_player.volume_db = -36 + ship.move_intent.length() * 16 + _effects_db() - _mix_duck
-	_space_player.volume_db = -33 + _effects_db() - _mix_duck
+	# Keep the mechanical bed under, not on top of, the user's soundtrack.
+	_space_player.volume_db = -33 + _effects_db() - _mix_duck - (12 if Music.has_active_music() else 0)
 	if not _space_player.playing:
 		_space_player.play()
 	if ship.move_intent.length() > 0.02 and not _thrust_player.playing:

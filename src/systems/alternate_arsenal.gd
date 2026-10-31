@@ -91,10 +91,11 @@ func _damage_tick(enemies: Array[Node], aim: Vector2, interval: float) -> void:
 	attack_fired.emit(source)
 	run_stats["damage_ticks"] += 1
 	var targets: Array[Node2D] = []
-	_beam_end = player.global_position + aim * 610
+	_beam_end = CombatGeometry.clip(player.global_position,player.global_position+aim*610,player.combat_geometry)
 	for candidate in enemies:
 		if not is_instance_valid(candidate) or candidate.is_queued_for_deletion() or not candidate.has_method("is_alive") or not candidate.is_alive():
 			continue
+		if not CombatGeometry.clear(player.global_position,candidate.global_position,player.combat_geometry): continue
 		var offset: Vector2 = candidate.global_position - player.global_position
 		if chassis_id == "bastion":
 			var closest := Geometry2D.get_closest_point_to_segment(candidate.global_position, player.global_position, _beam_end)

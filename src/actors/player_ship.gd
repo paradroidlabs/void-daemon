@@ -1,6 +1,8 @@
 class_name PlayerShip
 extends CharacterBody2D
 
+var combat_geometry: Array[Rect2] = []
+
 signal hull_changed(current: float, maximum: float)
 signal shield_changed(current: float, maximum: float)
 signal heat_changed(current: float, maximum: float)

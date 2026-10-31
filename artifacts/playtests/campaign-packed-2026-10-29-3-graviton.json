@@ -1,0 +1,233 @@
+{
+  "attempts": [
+    {
+      "banked": true,
+      "node": "outer_link",
+      "seconds": 11.3166666666668,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "courier",
+      "seconds": 45.0333333333321,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "picket",
+      "seconds": 30.4833333333329,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "coolant_archive",
+      "seconds": 40.199999999999,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "watchdog",
+      "seconds": 20.8166666666668,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "archive_recovery",
+      "seconds": 66.4499999999975,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "memory_spine",
+      "seconds": 243.350000000086,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "power_district",
+      "seconds": 209.100000000059,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "the_three_voices",
+      "seconds": 157.08333333335,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "the_warden",
+      "seconds": 146.750000000009,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "first_arrival",
+      "seconds": 199.516666666718,
+      "won": true
+    }
+  ],
+  "build": "desktop-2026.10.29.3",
+  "catalog_sha256": "a393d4366083ecfb007e391a8c1cbaa9cdf0e88670fe02f4a66cc2fc16820de5",
+  "chassis": "graviton",
+  "completed": true,
+  "completed_mission_seconds": 1170.10000000022,
+  "events": [
+    {
+      "hull": 100.0,
+      "node": "outer_link",
+      "objective_result": {},
+      "seconds": 11.3166666666668,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "courier",
+      "objective_result": {},
+      "seconds": 45.0333333333321,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "picket",
+      "objective_result": {},
+      "seconds": 30.4833333333329,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "coolant_archive",
+      "objective_result": {},
+      "seconds": 40.199999999999,
+      "won": true
+    },
+    {
+      "hull": 23.0,
+      "node": "watchdog",
+      "objective_result": {},
+      "seconds": 20.8166666666668,
+      "won": true
+    },
+    {
+      "hull": 48.0,
+      "node": "archive_recovery",
+      "objective_result": {},
+      "seconds": 66.4499999999975,
+      "won": true
+    },
+    {
+      "hull": 136.0,
+      "node": "memory_spine",
+      "objective_result": {},
+      "seconds": 243.350000000086,
+      "won": true
+    },
+    {
+      "hull": 136.0,
+      "node": "power_district",
+      "objective_result": {
+        "power_circuits": 3,
+        "time": 209.116666666725
+      },
+      "seconds": 209.100000000059,
+      "won": true
+    },
+    {
+      "hull": 136.0,
+      "node": "the_three_voices",
+      "objective_result": {
+        "convoy_hull": 450.0,
+        "convoy_repaired": false,
+        "time": 157.100000000017
+      },
+      "seconds": 157.08333333335,
+      "won": true
+    },
+    {
+      "hull": 139.0,
+      "node": "the_warden",
+      "objective_result": {
+        "stronghold_keys": 6,
+        "time": 146.766666666676
+      },
+      "seconds": 146.750000000009,
+      "won": true
+    },
+    {
+      "hull": 154.0,
+      "node": "first_arrival",
+      "objective_result": {
+        "bumps": 0,
+        "escaped": true,
+        "gates": 11,
+        "time": 199.533333333384
+      },
+      "seconds": 199.516666666718,
+      "won": true
+    }
+  ],
+  "failures": 0,
+  "frames": 70237,
+  "method": "normal game movement intents, aiming and chassis actions; no position, health, damage or objective writes",
+  "pilot_sha256": "343a157c5b0f9287bd1f15482141de5744f45c28dfb3d7359166949fa51b5ebf",
+  "runtime_kind": "exported",
+  "seed": "RELAY-EXPEDITION",
+  "source_files_sha256": {
+    "res://src/actors/command_core.gdc": "72d5f81251a01fbb81efe96ab534748aef7fd1b9f47323e4347b638f274221aa",
+    "res://src/actors/enemy.gdc": "40df2573031a0076757896edd9f1a4dc257a0e4b0de5ef42b15ec1b05bcb9a69",
+    "res://src/actors/graviton_field.gdc": "b63575283cf63b42badcdd47f24a007c62fbc383beaebd7b0fef0e3f4d5d1d39",
+    "res://src/actors/player_ship.gdc": "04a36ff2699e6845775fb4b7399cca4a94cdab915e4c7bfe2a28fe6f062d6871",
+    "res://src/actors/projectile.gdc": "204def3365527dddd2f2d40f5e0fa26c2cda67347e0a598845f5ea5e707a1138",
+    "res://src/actors/substrate_agent.gdc": "6ca59d80bfc495ebfaff5289b530bc3545918bdcb34b4cbee682e7c960fd6136",
+    "res://src/actors/swarm_missile.gdc": "7757a3bd8be17c8e2d70fcf50af7b591f38beefc72c1a99cf4f56ed4d48c0c26",
+    "res://src/actors/tow_decoy.gdc": "2d13a305f2efc3d6279269bd71d58ab4c040c7ce13b7df2a1f5cd5188ee1da4d",
+    "res://src/actors/watchdog_boss.gdc": "67f24fb0332fd882b24fe113e42c33193eb44b37c9e86db45387268c54dfc072",
+    "res://src/actors/xp_orb.gdc": "4783ca4851a6d631bfe3e62d05d112f0eb2bad8d2af32a42733b657b7dfa59c0",
+    "res://src/audio/music_director.gdc": "3b6d81bef9a81681364d5907f685c5edcb8e9bfeb777502316975a1544cb8dd8",
+    "res://src/audio/synth_audio.gdc": "cc5efa3c6e06766fe03b1eaaf57893b3b28898f89be671a996cb0e432728a876",
+    "res://src/campaign/archive_carrier.gdc": "297a5b083090b14e63a0a522eb6c129724b8e1c7988238bc6cee937d719322c9",
+    "res://src/campaign/campaign_host.gdc": "a97c5b1c4c162241a7d66560e687154172f127033692e638d0ef72b915894795",
+    "res://src/campaign/campaign_state.gdc": "ade629e88e090c690a6bdd2d30ccc2d36ffff433e3f7b285c51d04fcfa9bc992",
+    "res://src/campaign/chapter_catalog.gdc": "a393d4366083ecfb007e391a8c1cbaa9cdf0e88670fe02f4a66cc2fc16820de5",
+    "res://src/campaign/convoy_mission.gdc": "f705e40f993712afa71c8cb4e4278fade8aecf7a81aa289d831cf432ad4a806c",
+    "res://src/campaign/exodus_mission.gdc": "e3a445aa0e9933730f51907b5e16a04d2bb0178d3ae624dad3cf9480beecb17c",
+    "res://src/campaign/facility_mission.gdc": "b97697b4e4521bb560315e91bd383b7569f2762d32569118fce8f87946a04b70",
+    "res://src/campaign/gravity_intercept.gdc": "bc48ab4230867d81d8562169eabe48df1390ebf304883e7fbb8bdfb708cf52e0",
+    "res://src/campaign/picket_mission.gdc": "aaf82259bdca959a75cd2b94094a4b95245b2a4685663911ed7483781d5cad22",
+    "res://src/campaign/power_district.gdc": "f1f648cc8e84d6b28f95e2d43ee6287d33e16bb24b950a12518b5953eabaf31f",
+    "res://src/campaign/recovery_mission.gdc": "4b6ef132cebe7b8887738c567351c282cfcc67f009ba8755ff866b9bec23938c",
+    "res://src/campaign/sector_expedition.gdc": "d979ed375b5396eeee7eaff0b2e0954fcb510ec2c46ba872df7af76831472353",
+    "res://src/campaign/story_book.gdc": "b582268e128a4f5ed83f1abb3fec815ac195a7ae9fec421c366fb895d332876b",
+    "res://src/campaign/stronghold_mission.gdc": "f83afd358849b71d8d3f55fec220abdb0369c51c1a308556e0070a0f58c1513e",
+    "res://src/campaign/tactical_arena.gdc": "a2b3c9597572ffee6e00dde6302e41147b20b82070cc93eb6a10b04474f4aee5",
+    "res://src/main.gdc": "7ca05d5a8228c2f4f6a75c9dc227303e2df9430857feba798e2dcc46b9b8f21a",
+    "res://src/systems/alternate_arsenal.gdc": "dcceea517486a5c28903cf99cd459cafc558fa03ebc364f7579618224a55cc04",
+    "res://src/systems/chassis_catalog.gdc": "301cf374ea15526a0968eb86fd0d25c288cf07646ebc99080f08825b032c14a9",
+    "res://src/systems/experience.gdc": "6ecb045258e4b3e875aa2a85bdde0cc17e509ce70662ff589dfcab8c8fc68b32",
+    "res://src/systems/graviton_salvo.gdc": "ffaba3670bab20b3e23f203f399593c991ee5a9ea4399ff4a7cd177efcda188b",
+    "res://src/systems/substrate_encounter.gdc": "1639eb4fd8dad477b2930d019a73e87331c269a38af3393c41f29d335b83fd40",
+    "res://src/systems/substrate_memory.gdc": "67c07372666d1938ac7f6a0255cb1b14a0d4b560439b0ecd0d9ab7edcd55c5ce",
+    "res://src/systems/upgrade_catalog.gdc": "a8a4db39f4f68a456528203807329bdf418b94232cb512b27b7dd3e285c37511",
+    "res://src/systems/weapon_controller.gdc": "8e36efcfa40617865d3333f4e6f21037b64ccaec561e0d18c36eb0032c4eaf32",
+    "res://src/ui/boot_menu.gdc": "66bea19de2c42736e6475cad80c58e6b79ccdb04473db34c363b53a2398b0b22",
+    "res://src/ui/boss_health_bar.gdc": "26e58461a624c9e638d9f5838186fee3ad302be62c14d622cddb3b999e13efdd",
+    "res://src/ui/combat_rail.gdc": "9b8da88810f10f48bff0f5a94f27f434e6cbbfe546c00066640f8f2537bfc7d9",
+    "res://src/ui/combat_view.gdc": "ad9d17623461028920e3bd3bbc5e975d4d0eb63c0755b0b32b910ea6912592f4",
+    "res://src/ui/flight_telemetry.gdc": "a3fb5c105e63497117609e7d292a03fbd59fd74d4db3d54f9e5b23685198adb0",
+    "res://src/ui/hive_director.gdc": "3760af5da2df465f651716c8f895f805afc75d1ba586d3ea7a97e03aa767c9ba",
+    "res://src/ui/run_scorecard.gdc": "e1b2a938f1b6d074aed0ee8f1611e8811586d4401dcca681461adf8e7b39cb58",
+    "res://src/ui/story_illustration.gdc": "34cae3d56bedff7ed46d5eb0ec21fe934de2a0df8b2c63e248ae0a847f3c39ae",
+    "res://src/ui/terminal_hud.gdc": "f081b554c5cfe0baa9feaf9a1c371633a786ab3844b354dd84e16f4c0775f6c7",
+    "res://src/world/arena_backdrop.gdc": "14369fee601e88e0566ec23dd6c97c750282e364a65ed09a2a8882795a9adf7d",
+    "res://src/world/combat_geometry.gdc": "e50421feae931cdd19d0e42f647dcaf31708ababb7ac6cf146c259d57ac0ffb6",
+    "res://src/world/gravity_well.gdc": "1cfebe56bd513c7f49537f7da2e5c7351175f9c062b29e8de2875f0c937b34f9"
+  },
+  "source_unchanged": true,
+  "start_node": "",
+  "story_choices": {
+    "berth_room": "silent",
+    "listening_room": "challenge"
+  },
+  "story_reading": "advanced immediately by pilot; not measured or added to active mission time",
+  "wall_seconds": 77.456
+}

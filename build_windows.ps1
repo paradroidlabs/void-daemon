@@ -22,6 +22,26 @@ if ($LASTEXITCODE -ne 0) { throw 'Windows export failed.' }
 if (-not (Test-Path -LiteralPath $exePath)) { throw 'Export did not produce an executable.' }
 Copy-Item -LiteralPath (Join-Path $buildRoot 'DESKTOP_PLAYTEST.md') -Destination $outputDir
 Copy-Item -LiteralPath (Join-Path $buildRoot 'EXPERIENCE_PLAYTEST.md') -Destination $outputDir
+Copy-Item -LiteralPath (Join-Path $buildRoot 'EXPEDITION_AND_MUSIC_DIRECTION.md') -Destination $outputDir
+Copy-Item -LiteralPath (Join-Path $buildRoot 'UNIVERSE_AND_SUBSTRATE.md') -Destination $outputDir
+Copy-Item -LiteralPath (Join-Path $buildRoot 'PLAYTEST_SUBSTRATE.md') -Destination $outputDir
+Copy-Item -LiteralPath (Join-Path $buildRoot 'CAMPAIGN_PLAYTEST.md') -Destination $outputDir
+Copy-Item -LiteralPath (Join-Path $buildRoot 'PLAYTIME_AUDIT.md') -Destination $outputDir
+Copy-Item -LiteralPath (Join-Path $buildRoot 'CAMPAIGN_COMPLETION_AUDIT.md') -Destination $outputDir
+$probeVersion = $buildVersion.Replace('desktop-', '').Replace('.', '-')
+foreach ($probeChassis in @('graviton', 'bastion', 'scrapper', 'redline')) {
+    $probeFile = Join-Path $buildRoot ('artifacts\playtests\campaign-full-' + $probeVersion + '-' + $probeChassis + '.json')
+    if (Test-Path -LiteralPath $probeFile) {
+        $probeOutput = Join-Path $outputDir 'artifacts\playtests'
+        New-Item -ItemType Directory -Path $probeOutput -Force | Out-Null
+        Copy-Item -LiteralPath $probeFile -Destination $probeOutput
+    }
+}
+Copy-Item -LiteralPath (Join-Path $buildRoot 'distribution\Play Expedition.cmd') -Destination $outputDir
+Copy-Item -LiteralPath (Join-Path $buildRoot 'distribution\Play Substrate Encounter.cmd') -Destination $outputDir
+$musicDrop = Join-Path $outputDir 'music'
+New-Item -ItemType Directory -Path $musicDrop -Force | Out-Null
+Copy-Item -LiteralPath (Join-Path $buildRoot 'assets\music\README.md') -Destination $musicDrop
 Copy-Item -LiteralPath (Join-Path $buildRoot 'distribution\Play Combat Lab.cmd') -Destination $outputDir
 foreach ($license in @('GODOT-LICENSE.txt', 'GODOT-COPYRIGHT.txt')) {
     $licensePath = Join-Path $buildRoot ('.tools\windows\' + $license)
@@ -39,6 +59,11 @@ try {
     $exeStream.Dispose()
     $hashAlgorithm.Dispose()
 }
+$sourceHashes = [ordered]@{}
+foreach ($sourceFile in (Get-ChildItem -LiteralPath (Join-Path $buildRoot 'src') -Recurse -File | Where-Object { $_.Extension -in @('.gd', '.tscn', '.tres') } | Sort-Object FullName)) {
+    $relativeSource = $sourceFile.FullName.Substring($buildRoot.Length + 1).Replace('\', '/')
+    $sourceHashes[$relativeSource] = (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+}
 $manifest = [ordered]@{
     build = $buildVersion
     source_commit = $revision
@@ -47,6 +72,7 @@ $manifest = [ordered]@{
     architecture = 'windows-x86_64'
     embedded_pck = $true
     executable_sha256 = $exeHash
+    source_files_sha256 = $sourceHashes
 }
 # Generated build metadata, not a source-file edit.
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $outputDir 'build.json') -Encoding UTF8

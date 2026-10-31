@@ -50,4 +50,10 @@ func _draw() -> void:
 			detail += "    SEED " + String(snapshot.get("seed", "--"))
 	if detail.is_empty():
 		detail = "SPACE / VENT    SEED " + String(snapshot.get("seed", "--"))
+	if snapshot.has("substrate"):
+		var s: Dictionary = snapshot["substrate"]
+		detail = "%s / LINK %s / REPORTS %d / BLOCKED %d / HABIT %s" % [s["objective"], "ON" if s["link"] else "OFF", s["reports"], s["prevented"], "LEARNED" if s["memory"]["heading_bin"] >= 0 else "SAMPLING"]
 	text(detail, Vector2(12, 71), size.x - 24, muted, 11)
+	if snapshot.has("campaign_objective"):
+		draw_rect(Rect2(0, 54, size.x, 27), Color("09131c"))
+		text(snapshot["campaign_objective"], Vector2(12, 71), size.x - 24, cyan, 11)

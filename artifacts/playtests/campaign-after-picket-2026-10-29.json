@@ -1,0 +1,89 @@
+{
+  "attempts": [
+    {
+      "banked": true,
+      "node": "outer_link",
+      "seconds": 11.3166666666668,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "courier",
+      "seconds": 45.0333333333321,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "picket",
+      "seconds": 30.4833333333329,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "coolant_archive",
+      "seconds": 40.199999999999,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "watchdog",
+      "seconds": 20.8166666666668,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "archive_recovery",
+      "seconds": 66.4499999999975,
+      "won": true
+    }
+  ],
+  "build": "desktop-2026.10.29.1",
+  "catalog_sha256": "eb40f731ff98d9cb20fbd007c9c5212dd11bb08f61d4d8da18a1bbeaca4709d3",
+  "chassis": "graviton",
+  "completed": true,
+  "completed_mission_seconds": 214.299999999995,
+  "events": [
+    {
+      "hull": 100.0,
+      "node": "outer_link",
+      "seconds": 11.3166666666668,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "courier",
+      "seconds": 45.0333333333321,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "picket",
+      "seconds": 30.4833333333329,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "coolant_archive",
+      "seconds": 40.199999999999,
+      "won": true
+    },
+    {
+      "hull": 23.0,
+      "node": "watchdog",
+      "seconds": 20.8166666666668,
+      "won": true
+    },
+    {
+      "hull": 48.0,
+      "node": "archive_recovery",
+      "seconds": 66.4499999999975,
+      "won": true
+    }
+  ],
+  "failures": 0,
+  "frames": 12865,
+  "method": "normal game movement intents, aiming and chassis actions; no position, health, damage or objective writes",
+  "pilot_sha256": "7b0321652e836bdc3afc6a17fe2cd730b50cd10604d64c824c9637b40025497e",
+  "seed": "RELAY-EXPEDITION",
+  "wall_seconds": 12.404
+}

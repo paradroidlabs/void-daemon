@@ -56,7 +56,9 @@ func _ready() -> void:
 			_direct_flight = true
 	if _seed.is_empty():
 		_seed = "VOID-0001"
-	if direct:
+	if OS.get_cmdline_user_args().has("--campaign") or OS.get_cmdline_user_args().has("--resume-campaign"):
+		launch_campaign(OS.get_cmdline_user_args().has("--resume-campaign"))
+	elif direct:
 		_launch_cli = true
 		if not explicit_chassis:
 			selected = "graviton"
@@ -66,10 +68,15 @@ func _ready() -> void:
 
 
 func show_menu() -> void:
+	Music.reload_library()
+	Music.set_context("hangar")
 	get_tree().paused = false
 	Experience.stop_voice()
 	if is_instance_valid(game):
-		game.synth_audio.shutdown()
+		if game.has_method("shutdown"):
+			game.shutdown()
+		else:
+			game.synth_audio.shutdown()
 		game.queue_free()
 		game = null
 	if is_instance_valid(menu):
@@ -115,7 +122,7 @@ func show_menu() -> void:
 	left.position = Vector2.ZERO if _compact else Vector2(52, 40)
 	left.size = Vector2(column_width, 620)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	left.add_theme_constant_override("separation", 13)
+	left.add_theme_constant_override("separation", 13 if _compact else 10)
 	if _compact:
 		scroll.add_child(left)
 	else:
@@ -154,6 +161,12 @@ func show_menu() -> void:
 	left.add_child(lower)
 	action(lower, "SOUND / ACCESSIBILITY", func(): _settings.show(); _settings_back.grab_focus()).custom_minimum_size = Vector2(action_width, 44)
 	action(lower, "EXIT", func(): get_tree().quit()).custom_minimum_size = Vector2(action_width, 44)
+	action(left, "SUBSTRATE ENCOUNTER / RELAY PROOF", func(): launch_run(true, selected, false, "substrate")).custom_minimum_size.y = 44
+	var campaign_actions := HBoxContainer.new()
+	campaign_actions.add_theme_constant_override("separation", 12)
+	left.add_child(campaign_actions)
+	action(campaign_actions, "NEW EXPEDITION", func(): launch_campaign(false)).custom_minimum_size = Vector2(action_width, 44)
+	action(campaign_actions, "RESUME CHECKPOINT", func(): launch_campaign(true)).custom_minimum_size = Vector2(action_width, 44)
 	label(left, "%s // PROTOTYPE / LIVE HIVE SIGNAL" % ProjectSettings.get_setting("application/config/version", "DEV"), 10, Color("597984"))
 	var preview_label := Label.new()
 	preview_label.text = "CHASSIS LINK // LIVE SCHEMATIC\n\nCYAN NOSE / AMBER TRAVEL\nTHRUST DOES NOT ERASE MOMENTUM"
@@ -236,20 +249,43 @@ func select_ship(id: String) -> void:
 	_preview.collision_mask = 0
 
 
-func launch_run(lab: bool, id: String, classic: bool = false) -> void:
+func launch_campaign(resume_saved: bool) -> void:
+	get_tree().paused = false
+	if is_instance_valid(menu):
+		menu.queue_free()
+		menu = null
+	if is_instance_valid(game):
+		if game.has_method("shutdown"):
+			game.shutdown()
+		elif game.get("synth_audio") != null:
+			game.synth_audio.shutdown()
+		game.queue_free()
+	game = load("res://src/campaign/campaign_host.gd").new()
+	game.selected_chassis = selected
+	game.touch_controls = _touch
+	game.resume_requested = resume_saved
+	add_child(game)
+
+
+func launch_run(lab: bool, id: String, classic: bool = false, fixture: String = "") -> void:
 	get_tree().paused = false
 	Experience.stop_voice()
 	if is_instance_valid(menu):
 		menu.queue_free()
 		menu = null
 	if is_instance_valid(game):
-		game.synth_audio.shutdown()
+		if game.has_method("shutdown"):
+			game.shutdown()
+		else:
+			game.synth_audio.shutdown()
 		game.queue_free()
 	game = preload("res://src/main.tscn").instantiate()
 	game._honor_command_line = _launch_cli
 	_launch_cli = false
 	game._chassis = id
 	game._combat_lab = lab
+	if not fixture.is_empty():
+		game._lab_fixture = fixture
 	game._combo_mode = not classic
 	game.run_seed_text = _seed
 	game._using_touch = _touch

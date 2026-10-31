@@ -1,6 +1,8 @@
 class_name WeaponController
 extends Node
 
+var combat_geometry: Array[Rect2] = []
+
 signal projectile_requested(origin: Vector2, direction: Vector2, stats: Dictionary, team: StringName)
 signal arc_fired(points: PackedVector2Array, color: Color)
 signal heat_generated(amount: float)
@@ -231,6 +233,8 @@ func _nearest_enemies(origin: Vector2, enemies: Array[Node], excluded: Array, ma
 		if not is_instance_valid(enemy) or excluded.has(enemy) or not _is_enemy_alive(enemy):
 			continue
 		if not enemy is Node2D:
+			continue
+		if not CombatGeometry.clear(origin,enemy.global_position,combat_geometry):
 			continue
 		var distance_squared := (enemy as Node2D).global_position.distance_squared_to(origin)
 		if distance_squared <= max_distance_squared:

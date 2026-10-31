@@ -1,6 +1,8 @@
 class_name Projectile
 extends Area2D
 
+var combat_geometry: Array[Rect2] = []
+
 ## Lightweight, scene-free projectile used by both player and enemy weapons.
 ## Pierce is the number of *additional* targets the projectile may cross after
 ## its first hit: 0 hits one target, 1 hits two targets, and so on.
@@ -93,7 +95,11 @@ func _physics_process(delta: float) -> void:
 	if _is_expired:
 		return
 
-	global_position += velocity * delta
+	var next := global_position + velocity * delta
+	if not CombatGeometry.clear(global_position,next,combat_geometry,hit_radius):
+		expire(&"blocked")
+		return
+	global_position = next
 	_life_ticks_remaining -= 1
 	if _life_ticks_remaining <= 0:
 		expire(&"lifetime")

@@ -1,5 +1,11 @@
 # VOID//DAEMON — playable Godot prototype
 
+October 31 source checkpoint: [`checkpoint/first-arrival-2026-10-31`](https://github.com/paradroidlabs/void-daemon/tree/checkpoint/first-arrival-2026-10-31). See [checkpoint notes](CHECKPOINT_2026-10-31.md) for the original build checksums, included evidence and exclusions. Executables remain local rather than large Git objects; this branch is not a merge to master or a new release announcement.
+
+**October 29 / First Arrival campaign:** local `desktop-2026.10.29.3` adds a complete eleven-mission prototype chapter with three illustrated story interludes, persistent builds/checkpoints, gravity interception, solid-cover facilities, archive rescue, seeded sector exploration, matched-cell power routing, convoy protection, a three-stage Warden and a combat escape. Choose NEW EXPEDITION in the hangar. Full normal-input tests across all four chassis measure **19:30–20:54 active simulation**, before reading. See [Campaign playtest](CAMPAIGN_PLAYTEST.md) and [timing evidence](PLAYTIME_AUDIT.md). Human feel, final balance, device hardware and performance remain unverified. This local build is not the older published GitHub release.
+
+**October 23 local build:** [Substrate relay encounter](PLAYTEST_SUBSTRATE.md) is playable from the hangar or lab F9: five role-bearing entities, finite sight, delayed/interrupted reports, decaying travel hypotheses, a bounded flanker intercept, and break-relay/extract objectives. Esc/P → MIND inspects the actual session state. This is an initial AI proof, not the full proposed A-Life ecosystem. Existing survival and lab fixtures remain available.
+
 ![Four-chassis hangar](artifacts/hangar_experience.png)
 
 🎬 **[Watch Gameplay Trailer](artifacts/void_daemon_trailer.mp4)** — 30-second highlight reel featuring autonomous weapon processes, patch evolutions, thermal reactor venting, and swarm combat.
@@ -21,7 +27,11 @@ Combat now has its own clipped viewport, with a thin status rail above and telem
 
 **Start the example:** `play_combo_lab.cmd` opens Cluster + Full Chain, with selectable encounters and loadouts. See [Graviton playtest instructions](PLAYTEST_GRAVITON.md). `play_classic.cmd` retains the previous automatic-weapon/VENT mode; a pre-change source archive is also preserved in `artifacts/`.
 
-The prototype uses Godot 4.7.1, GDScript, code-drawn visuals, and procedurally synthesized audio — **zero external asset dependencies**.
+The prototype uses Godot 4.7.1, GDScript, code-drawn visuals, and procedural effects. Optional creator-authored music loads locally; no external assets are required to run.
+
+The October 22 source update adds full live stats: **Esc/P**, controller Start, or touch **II** opens a paused flight-recorder snapshot; Resume keeps the encounter. The lab's F7/Report no longer ends the test. Pause Options provides restart, hangar, quit, and in-run audio/accessibility controls. Desktop stats remain one sheet; compact stats use fixed tabs, never a scroller.
+
+For your own soundtrack, place Ogg Vorbis/MP3/PCM WAV files in `music` beside the EXE, or [`assets/music`](assets/music/README.md) in source. Shared/context playlists, crossfades, a separate MUSIC slider, hive ducking, and Reload Local Music are implemented. No supplied compositions were present for a real mix audition. The [expedition, racer and separate music-workspace direction](EXPEDITION_AND_MUSIC_DIRECTION.md) is proposed work, not implemented modes.
 
 On a fresh clone, install Godot 4.7.1 and open `project.godot`; the portable engine in `.tools/` is intentionally not tracked. The Windows wrappers expect its executables under `.tools/godot/`. With an installed Godot on your PATH, launch the lab directly with `godot --path . -- --combo-lab --fixture=cluster --loadout=chain`.
 
@@ -29,7 +39,7 @@ On a fresh clone, install Godot 4.7.1 and open `project.godot`; the portable eng
 
 For a standalone Windows executable and the full desktop test checklist, see [Desktop playtest](DESKTOP_PLAYTEST.md). Source branch: `prototype/graviton-salvo-checkpoint`. The default `master` branch is the older demo; it is not the current combat experiment.
 
-[Download the Windows desktop playtest](https://github.com/paradroidlabs/void-daemon/releases/tag/desktop-2026.10.19.3) — extract the ZIP, then open `VOID-DAEMON.exe` for the hangar or `Play Combat Lab.cmd` for the repeatable Graviton lab. Choose any chassis in the hangar and open its lab. No Godot installation is needed to play.
+[Last published Windows desktop playtest (October 19)](https://github.com/paradroidlabs/void-daemon/releases/tag/desktop-2026.10.19.3) — extract the ZIP, then open `VOID-DAEMON.exe` for the hangar or `Play Combat Lab.cmd` for the repeatable Graviton lab. This older release does not contain the October 22 live-stats/music changes; rebuild current source for those. No Godot installation is needed to play.
 
 On Windows, the execution-policy-free launcher is:
 
@@ -75,6 +85,7 @@ You can also open `project.godot` in Godot and press **F6/F5**.
 - Classic mode uses `Space` or right mouse for `VENT` instead of the Graviton kit.
 - `1`, `2`, `3` or mouse: choose an upgrade.
 - `T`: show/hide the touch layer for desktop testing.
+- `Esc` / `P`: full live stats and pause; Resume preserves the run. Pause Options contains restart/hangar/quit and audio settings.
 - `F10`: debug-skip to the boss.
 
 ### Controller
@@ -84,13 +95,14 @@ You can also open `project.godot` in Godot and press **F6/F5**.
 - Right trigger: hold/release the selected chassis attack.
 - `A` or right shoulder: chassis maneuver (`VENT` in classic mode).
 - Upgrade cards use normal controller focus and accept input.
+- Start: inspect live stats; Start/B or the Resume button continues.
 
 ### Mobile touch
 
 - Lower-left virtual stick: move.
 - Hold/drag the right action pad: hold and aim the chassis attack; release to unleash or stop as appropriate.
 - Lower-right labeled maneuver: escape. Slide from the held action pad into it to cancel first and escape without an accidental release attack.
-- `II` pauses. Shield is passive. Classic mode retains right drag-to-bias and the `VENT` button.
+- `II` pauses into live stats. Tap Resume to continue. Shield is passive. Classic mode retains right drag-to-bias and the `VENT` button.
 - Tap upgrade cards directly.
 
 The touch layout observes the platform safe area and the project is locked to landscape orientation.

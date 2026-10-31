@@ -117,6 +117,8 @@ func observe(delta: float) -> void:
 	_pane.visible = _visible_left > 0
 	_pane.size = get_viewport().get_visible_rect().size
 	_pane.queue_redraw()
+	if is_instance_valid(game.substrate):
+		return # Encounter speech is sourced from actual delivered reports/decisions.
 	_sample_left -= delta
 	if _sample_left > 0 or _cooldown > 0:
 		return

@@ -1,6 +1,8 @@
 class_name SwarmMissile
 extends Node2D
 
+var combat_geometry: Array[Rect2] = []
+
 signal detonated(position: Vector2)
 signal retired(hit: bool, retargets: int)
 var target: Node2D
@@ -37,7 +39,11 @@ func _physics_process(delta: float) -> void:
 	direction = Vector2.RIGHT.rotated(rotate_toward(direction.angle(), wanted.angle(), 5.0 * delta))
 	speed = minf(720, speed + delta * 600)
 	var previous := global_position
-	global_position += direction * speed * delta
+	var next := global_position + direction * speed * delta
+	if not CombatGeometry.clear(global_position,next,combat_geometry,5):
+		detonate(global_position)
+		return
+	global_position = next
 	trail.push_front(global_position)
 	if trail.size() > 12:
 		trail.pop_back()
@@ -82,6 +88,7 @@ func detonate(position: Vector2, direct: Node2D = null) -> void:
 			continue
 		var distance: float = enemy.global_position.distance_to(position)
 		if enemy == direct or distance <= splash_radius:
+			if not CombatGeometry.clear(position,enemy.global_position,combat_geometry): continue
 			var amount := damage if enemy == direct else damage * lerpf(0.72, 0.42, clampf(distance / splash_radius, 0, 1))
 			enemy.take_damage(amount, &"GRAVITON_SALVO", position)
 			hit = true
@@ -91,7 +98,7 @@ func detonate(position: Vector2, direct: Node2D = null) -> void:
 
 
 func _alive(node: Node) -> bool:
-	return is_instance_valid(node) and not node.is_queued_for_deletion() and node is Node2D and node.has_method("is_alive") and node.is_alive()
+	return is_instance_valid(node) and not node.is_queued_for_deletion() and node is Node2D and node.has_method("is_alive") and node.is_alive() and CombatGeometry.clear(global_position,node.global_position,combat_geometry)
 
 
 func _draw() -> void:

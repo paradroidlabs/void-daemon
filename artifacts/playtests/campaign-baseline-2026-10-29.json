@@ -1,0 +1,84 @@
+{
+  "attempts": [
+    {
+      "banked": true,
+      "node": "outer_link",
+      "seconds": 11.3166666666668,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "courier",
+      "seconds": 45.0333333333321,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "picket",
+      "seconds": 4.54999999999999,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "coolant_archive",
+      "seconds": 40.199999999999,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "watchdog",
+      "seconds": 20.8166666666668,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "archive_recovery",
+      "seconds": 66.4499999999975,
+      "won": true
+    }
+  ],
+  "completed": true,
+  "completed_mission_seconds": 188.366666666662,
+  "events": [
+    {
+      "hull": 100.0,
+      "node": "outer_link",
+      "seconds": 11.3166666666668,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "courier",
+      "seconds": 45.0333333333321,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "picket",
+      "seconds": 4.54999999999999,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "coolant_archive",
+      "seconds": 40.199999999999,
+      "won": true
+    },
+    {
+      "hull": 23.0,
+      "node": "watchdog",
+      "seconds": 20.8166666666668,
+      "won": true
+    },
+    {
+      "hull": 48.0,
+      "node": "archive_recovery",
+      "seconds": 66.4499999999975,
+      "won": true
+    }
+  ],
+  "failures": 0,
+  "frames": 11309,
+  "method": "normal game movement intents, aiming and chassis actions; no position, health, damage or objective writes",
+  "wall_seconds": 12.553
+}

@@ -1,0 +1,106 @@
+{
+  "attempts": [
+    {
+      "banked": true,
+      "node": "outer_link",
+      "seconds": 11.3166666666668,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "courier",
+      "seconds": 45.0333333333321,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "picket",
+      "seconds": 30.4833333333329,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "coolant_archive",
+      "seconds": 40.199999999999,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "watchdog",
+      "seconds": 20.8166666666668,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "archive_recovery",
+      "seconds": 66.4499999999975,
+      "won": true
+    },
+    {
+      "banked": true,
+      "node": "memory_spine",
+      "seconds": 398.349999999966,
+      "won": true
+    }
+  ],
+  "build": "desktop-2026.10.29.2",
+  "catalog_sha256": "54128639b1d153d393405adee085396baaa4701ef6ec26e13f43d40a1ae7fb74",
+  "chassis": "graviton",
+  "completed": true,
+  "completed_mission_seconds": 612.649999999961,
+  "events": [
+    {
+      "hull": 100.0,
+      "node": "outer_link",
+      "seconds": 11.3166666666668,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "courier",
+      "seconds": 45.0333333333321,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "picket",
+      "seconds": 30.4833333333329,
+      "won": true
+    },
+    {
+      "hull": 100.0,
+      "node": "coolant_archive",
+      "seconds": 40.199999999999,
+      "won": true
+    },
+    {
+      "hull": 23.0,
+      "node": "watchdog",
+      "seconds": 20.8166666666668,
+      "won": true
+    },
+    {
+      "hull": 48.0,
+      "node": "archive_recovery",
+      "seconds": 66.4499999999975,
+      "won": true
+    },
+    {
+      "hull": 136.0,
+      "node": "memory_spine",
+      "seconds": 398.349999999966,
+      "won": true
+    }
+  ],
+  "failures": 0,
+  "frames": 36779,
+  "method": "normal game movement intents, aiming and chassis actions; no position, health, damage or objective writes",
+  "pilot_sha256": "f8b1a32816504b27ff39ae8ba0f468ff9e35a393218aa612a6d7a8dc66489d7d",
+  "seed": "RELAY-EXPEDITION",
+  "story_choices": {
+    "berth_room": "silent",
+    "listening_room": "challenge"
+  },
+  "story_reading": "advanced immediately by pilot; not measured or added to active mission time",
+  "wall_seconds": 45.84
+}

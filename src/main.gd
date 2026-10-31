@@ -1,5 +1,22 @@
 extends Node2D
 
+signal campaign_finished(victory: bool, report: Dictionary)
+var _campaign_mode := false
+var _campaign_kind := "relay"
+var _campaign_flags: Dictionary = {}
+var _campaign_failure_reason := ""
+var transit: Node2D
+var facility: Node2D
+var recovery: Node2D
+var picket: Node2D
+var expedition: Node2D
+var expedition_result: Dictionary = {}
+var tactical: Node2D
+var tactical_result: Dictionary={}
+var recovery_result: Dictionary = {}
+var facility_result: Dictionary = {}
+var transit_result: Dictionary = {}
+
 const PlayerShipScript := preload("res://src/actors/player_ship.gd")
 const EnemyScript := preload("res://src/actors/enemy.gd")
 const ProjectileScript := preload("res://src/actors/projectile.gd")
@@ -51,6 +68,7 @@ var _chassis := "graviton"
 var hive: HiveDirector
 var _honor_command_line := true
 var combat_view: SubViewportContainer
+var substrate: SubstrateEncounter
 
 var run_seed_text := "VOID-0001"
 var run_seed: int = 1
@@ -99,6 +117,7 @@ func _ready() -> void:
 	if not _combat_lab:
 		_setup_navigation_gravity()
 	_connect_runtime()
+	Music.set_context("lab" if _combat_lab else "survival")
 	_update_hud(true)
 	if _combat_lab:
 		_reset_lab()
@@ -111,7 +130,7 @@ func _ready() -> void:
 
 func _build_world() -> void:
 	combat_view = preload("res://src/ui/combat_view.gd").new()
-	combat_view.lab = _combat_lab
+	combat_view.lab = _combat_lab and not _campaign_mode
 	combat_view.footer_height = 120 if _combo_mode else 64
 	add_child(combat_view)
 	backdrop = ArenaBackdropScript.new()
@@ -163,7 +182,7 @@ func _build_world() -> void:
 	hud = TerminalHUDScript.new()
 	hud.name = "TerminalHUD"
 	add_child(hud)
-	hud.set_combo_mode(_combo_mode, _combat_lab)
+	hud.set_combo_mode(_combo_mode, _combat_lab and not _campaign_mode)
 	if _combo_mode:
 		hud.set_chassis(_chassis)
 	if _using_touch or OS.has_feature("mobile") or OS.get_cmdline_user_args().has("--touch-ui"):
@@ -205,7 +224,8 @@ func _connect_runtime() -> void:
 	hud.lab_fixture_requested.connect(_select_fixture)
 	hud.lab_loadout_requested.connect(_select_loadout)
 	hud.lab_reset_requested.connect(_reset_lab)
-	hud.lab_report_requested.connect(func(): _end_run(false))
+	hud.live_stats_requested.connect(func(): hud.show_live_stats(_build_run_report(false)))
+	hud.lab_report_requested.connect(func(): hud.toggle_pause(true))
 	if is_instance_valid(graviton):
 		graviton.attack_fired.connect(_record_attack)
 		graviton.sfx_requested.connect(synth_audio.play_cue)
@@ -215,11 +235,35 @@ func _connect_runtime() -> void:
 func _physics_process(delta: float) -> void:
 	if run_ended:
 		return
+	if is_instance_valid(transit):
+		transit.tick(delta)
+		if run_ended:
+			return
+	if is_instance_valid(facility):
+		facility.tick(delta)
+		if run_ended: return
+	if is_instance_valid(recovery):
+		recovery.tick(delta)
+		if run_ended: return
+	if is_instance_valid(picket):
+		picket.tick(delta)
+		if run_ended: return
+	if is_instance_valid(expedition):
+		expedition.tick(delta)
+		if run_ended: return
+	if is_instance_valid(tactical):
+		tactical.tick(delta)
+		if run_ended: return
+	if is_instance_valid(substrate):
+		substrate.tick(delta)
+		if run_ended:
+			return
 	_update_input_intents()
 	_poll_controller_unleash()
 	if is_instance_valid(hive):
 		hive.observe(delta)
 	synth_audio.update_flight(player, _chassis, is_instance_valid(hive) and hive._visible_left > 0)
+	Music.set_ducked(is_instance_valid(hive) and hive._visible_left > 0)
 	if _combat_lab and not _lab_live:
 		_update_hud()
 		return
@@ -230,6 +274,8 @@ func _physics_process(delta: float) -> void:
 	if not _combat_lab and spawn_timer <= 0.0:
 		_spawn_wave_tick()
 	var enemies: Array[Node] = get_tree().get_nodes_in_group("enemies")
+	if not player.combat_geometry.is_empty():
+		enemies = enemies.filter(func(enemy): return is_instance_valid(enemy) and CombatGeometry.clear(player.global_position,enemy.global_position,player.combat_geometry))
 	if is_instance_valid(graviton):
 		graviton.tick(delta, enemies)
 		synth_audio.set_charge(graviton.is_charging, graviton.charge_ratio, _chassis)
@@ -280,7 +326,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventKey and event.pressed and not event.echo:
-		if _combat_lab:
+		if _combat_lab and not _campaign_mode:
 			match event.physical_keycode:
 				KEY_F1: _select_fixture("cluster")
 				KEY_F2: _select_fixture("dispersed")
@@ -288,8 +334,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				KEY_F4: _select_loadout("salvo")
 				KEY_F5: _select_loadout("gravity")
 				KEY_F6: _select_loadout("chain")
-				KEY_F7: _end_run(false)
+				KEY_F7: hud.toggle_pause(true)
 				KEY_F8: _select_fixture("orbit")
+				KEY_F9: _select_fixture("substrate")
 				KEY_R: _reset_lab()
 		match event.physical_keycode:
 			KEY_SPACE:
@@ -302,12 +349,16 @@ func _unhandled_input(event: InputEvent) -> void:
 				hud.set_touch_controls_visible(_using_touch)
 				hud.flash_log("TOUCH LAYER %s" % ("ONLINE" if _using_touch else "OFFLINE"), AMBER)
 			KEY_F10:
-				if not boss_spawned:
+				if not boss_spawned and not _campaign_mode:
 					debug_boss_skip = true
 					elapsed_time = BOSS_SPAWN_TIME - 0.1
 					hud.flash_log("DEBUG // FAST-FORWARD TO WATCHDOG", MAGENTA)
 			KEY_ESCAPE, KEY_P:
 				hud.toggle_pause()
+			KEY_M:
+				if is_instance_valid(expedition):
+					hud.toggle_pause(true)
+					hud._set_end_page(6)
 	if not _combo_mode and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
 		_try_vent()
 	if event is InputEventJoypadButton and event.pressed:
@@ -419,7 +470,7 @@ func _update_input_intents() -> void:
 
 
 func _select_fixture(value: String) -> void:
-	if value in ["cluster", "dispersed", "boss", "orbit"]:
+	if value in ["cluster", "dispersed", "boss", "orbit", "substrate"]:
 		_lab_fixture = value
 		_reset_lab()
 
@@ -435,7 +486,25 @@ func _reset_lab() -> void:
 		hive.reset()
 	if not _combat_lab:
 		return
+	Music.set_context("lab")
 	_cancel_active_input()
+	if is_instance_valid(substrate):
+		substrate.active = false
+	substrate = null
+	transit = null
+	facility = null
+	recovery = null
+	picket = null
+	expedition = null
+	expedition_result.clear()
+	tactical=null
+	tactical_result.clear()
+	recovery_result.clear()
+	_campaign_failure_reason=""
+	facility_result.clear()
+	player.combat_geometry.clear()
+	weapon_controller.combat_geometry.clear()
+	transit_result.clear()
 	for child in world_root.get_children():
 		if child != player and child != graviton:
 			child.queue_free()
@@ -481,10 +550,105 @@ func _reset_lab() -> void:
 	weapon_controller._mass_cooldown = 0.18
 	weapon_controller._arc_cooldown = 0.7
 	weapon_controller._marked_enemy = null
-	for index in range(12 if _lab_fixture == "cluster" else 8):
+	if _campaign_mode and _campaign_kind in ["power","convoy","stronghold","exodus"]:
+		var scripts := {"power":"power_district","convoy":"convoy_mission","stronghold":"stronghold_mission","exodus":"exodus_mission"}
+		tactical=load("res://src/campaign/"+scripts[_campaign_kind]+".gd").new()
+		world_root.add_child(tactical)
+		tactical.enemy_spawned.connect(_wire_campaign_enemy)
+		tactical.completed.connect(func(result: Dictionary): tactical_result=result; _end_run(true))
+		tactical.failed.connect(func(): _campaign_failure_reason=tactical.failure_reason; _end_run(false))
+		tactical.message.connect(func(text: String): hud.flash_log(text,CYAN))
+		tactical.setup(player,_campaign_flags)
+		weapon_controller.combat_geometry.assign(tactical.walls)
+		backdrop.configure(tactical.bounds,run_seed)
+		camera.limit_left=int(tactical.bounds.position.x)
+		camera.limit_top=int(tactical.bounds.position.y)
+		camera.limit_right=int(tactical.bounds.end.x)
+		camera.limit_bottom=int(tactical.bounds.end.y)
+		_lab_live=true
+		camera.reset_smoothing()
+		_update_hud(true)
+		return
+	if _campaign_mode and _campaign_kind == "expedition":
+		expedition = preload("res://src/campaign/sector_expedition.gd").new()
+		world_root.add_child(expedition)
+		expedition.enemy_spawned.connect(_wire_campaign_enemy)
+		expedition.completed.connect(func(result: Dictionary): expedition_result=result; _end_run(true))
+		expedition.message.connect(func(text: String): hud.flash_log(text,CYAN))
+		expedition.setup(player,run_seed)
+		weapon_controller.combat_geometry.assign(expedition.walls)
+		backdrop.configure(expedition.BOUNDS,run_seed)
+		camera.limit_left=int(expedition.BOUNDS.position.x)
+		camera.limit_top=int(expedition.BOUNDS.position.y)
+		camera.limit_right=int(expedition.BOUNDS.end.x)
+		camera.limit_bottom=int(expedition.BOUNDS.end.y)
+		_lab_live=true
+		camera.reset_smoothing()
+		_update_hud(true)
+		hud.flash_log("MEMORY SPINE / PAUSE + MAP TO PLAN YOUR ROUTE / ONE CARGO SLOT",CYAN)
+		return
+	if _campaign_mode and _campaign_kind == "recovery":
+		recovery = preload("res://src/campaign/recovery_mission.gd").new()
+		world_root.add_child(recovery)
+		recovery.setup(player,_campaign_flags)
+		for actor in recovery.actors: _wire_campaign_enemy(actor)
+		recovery.enemy_spawned.connect(_wire_campaign_enemy)
+		recovery.completed.connect(func(result: Dictionary): recovery_result=result; _end_run(true))
+		recovery.failed.connect(func(): _campaign_failure_reason=recovery.failure_reason; _end_run(false))
+		recovery.message.connect(func(text: String): hud.flash_log(text,CYAN))
+		_lab_live=true
+		camera.reset_smoothing()
+		_update_hud(true)
+		return
+	if _campaign_mode and _campaign_kind == "facility":
+		facility = preload("res://src/campaign/facility_mission.gd").new()
+		world_root.add_child(facility)
+		facility.setup(player)
+		weapon_controller.combat_geometry.assign(facility.walls)
+		for enemy in facility.actors:
+			enemy.died.connect(_on_enemy_died)
+			enemy.damaged.connect(_record_enemy_damage)
+			enemy.contact_hit.connect(_on_enemy_contact)
+			enemy.shot_requested.connect(_on_enemy_shot_requested)
+		facility.completed.connect(func(result: Dictionary): facility_result=result; _end_run(true))
+		facility.message.connect(func(text: String): hud.flash_log(text,CYAN))
+		_lab_live = true
+		camera.reset_smoothing()
+		_update_hud(true)
+		return
+	if _campaign_mode and _campaign_kind == "transit":
+		transit = preload("res://src/campaign/gravity_intercept.gd").new()
+		world_root.add_child(transit)
+		transit.setup(player)
+		transit.completed.connect(func(result: Dictionary): transit_result = result; _end_run(true))
+		transit.failed.connect(func(): _campaign_failure_reason="Interception window expired."; _end_run(false))
+		_lab_live = true
+		weapon_controller.enabled = false
+		Music.set_context("race")
+		camera.reset_smoothing()
+		_update_hud(true)
+		hud.flash_log("GRAVITY LANE / FOLLOW ORDERED GATES / AUTO WEAPONS STOWED / BEAT THE COURIER", CYAN)
+		return
+	if _campaign_mode and _campaign_kind == "clear":
+		picket=preload("res://src/campaign/picket_mission.gd").new()
+		world_root.add_child(picket)
+		picket.setup(player,bool(_campaign_flags.get("courier_escaped",false)))
+		for enemy in picket.actors: _wire_campaign_enemy(enemy)
+		picket.completed.connect(func(): _end_run(true))
+		picket.message.connect(func(text: String): hud.flash_log(text,CYAN))
+		_lab_live = true
+		camera.reset_smoothing()
+		_update_hud(true)
+		return
+	if _lab_fixture == "substrate":
+		_start_substrate_encounter()
+		return
+	var lab_count := 12 if _lab_fixture=="cluster" else 8
+	if _campaign_mode and _campaign_kind=="boss" and _campaign_flags.get("listening_room_choice","")=="spoof": lab_count=4
+	for index in range(lab_count):
 		var position := Vector2(320 + (index % 4 - 1.5) * 64, (index / 4 - 1) * 72)
 		if _lab_fixture != "cluster":
-			position = Vector2.RIGHT.rotated(float(index) * TAU / 8.0) * 380
+			position = Vector2.RIGHT.rotated(float(index) * TAU / lab_count) * 380
 		var enemy: Enemy = EnemyScript.new()
 		var kind: StringName = &"bit" if _lab_fixture == "cluster" else (&"sentry" if index % 2 == 0 else &"vector")
 		enemy.configure(kind, position, {"health": 125.0, "speed": 30.0 if _lab_fixture == "cluster" else 65.0, "xp": 2, "simulation_enabled": false}, player)
@@ -497,11 +661,45 @@ func _reset_lab() -> void:
 		enemy.shot_requested.connect(_on_enemy_shot_requested)
 	if _lab_fixture == "boss":
 		_spawn_boss()
-		boss.set_physics_process(false)
+		boss.set_physics_process(_campaign_mode)
+		if _campaign_mode:
+			_lab_live = true
+			for enemy in get_tree().get_nodes_in_group("enemy_normal"):
+				enemy.simulation_enabled = true
 	camera.reset_smoothing()
 	hud.set_lab_selection(_lab_fixture, _lab_loadout)
 	_update_hud(true)
 	hud.flash_log("LAB READY // AIM THEN HOLD M1 // R: RESET // F1-F3: ENCOUNTER // F4-F6: LOADOUT", CYAN)
+
+
+func _wire_campaign_enemy(actor: Enemy) -> void:
+	actor.died.connect(_on_enemy_died)
+	actor.damaged.connect(_record_enemy_damage)
+	actor.contact_hit.connect(_on_enemy_contact)
+	actor.shot_requested.connect(_on_enemy_shot_requested)
+
+
+func _start_substrate_encounter() -> void:
+	player.global_position = Vector2(-280, 0)
+	substrate = preload("res://src/systems/substrate_encounter.gd").new()
+	world_root.add_child(substrate)
+	substrate.setup(player, run_seed)
+	for enemy in substrate.agents:
+		enemy.died.connect(_on_enemy_died)
+		enemy.damaged.connect(_record_enemy_damage)
+		enemy.contact_hit.connect(_on_enemy_contact)
+		enemy.shot_requested.connect(_on_enemy_shot_requested)
+	substrate.notice.connect(func(event: String, text: String):
+		hud.flash_log(text, AMBER)
+		if is_instance_valid(hive):
+			hive.transmit("substrate_" + event, text, true)
+	)
+	substrate.extracted.connect(func(): _end_run(true))
+	_lab_live = true
+	camera.reset_smoothing()
+	hud.set_lab_selection(_lab_fixture, _lab_loadout)
+	_update_hud(true)
+	hud.flash_log("SUBSTRATE // BREAK RELAY THEN EXTRACT LEFT // SENSOR SHADOW BREAKS SIGHT // F7: INSPECT", CYAN)
 
 
 func _setup_navigation_gravity() -> void:
@@ -580,6 +778,7 @@ func _spawn_enemy() -> void:
 func _spawn_projectile(origin: Vector2, direction: Vector2, stats: Dictionary, team: StringName = &"player") -> Projectile:
 	var projectile: Projectile = ProjectileScript.new()
 	projectile.configure(origin, direction, stats, team)
+	projectile.combat_geometry.assign(player.combat_geometry)
 	if team == &"player":
 		_record_attack(projectile.source_id)
 	projectile.projectile_hit.connect(_on_projectile_hit)
@@ -819,6 +1018,7 @@ func _on_boss_died(_boss_node: Node, _xp_value: int, source_id: String) -> void:
 func _end_run(victory: bool) -> void:
 	if run_ended:
 		return
+	Music.set_context("debrief")
 	run_ended = true
 	if is_instance_valid(hive):
 		hive.silence()
@@ -830,7 +1030,11 @@ func _end_run(victory: bool) -> void:
 		synth_audio.set_charge(false)
 	player.set_move_intent(Vector2.ZERO)
 	_update_hud(true)
-	hud.show_end_screen(victory, _build_run_report(victory))
+	if _campaign_mode:
+		get_tree().paused = true
+		campaign_finished.emit(victory, _build_run_report(victory))
+	else:
+		hud.show_end_screen(victory, _build_run_report(victory))
 
 
 func _source_entry(source_id: StringName) -> Dictionary:
@@ -877,8 +1081,8 @@ func _build_run_report(victory: bool) -> Dictionary:
 		"Survived": hud.format_duration(elapsed_time), "Kills / level": "%d / %d" % [kills, level],
 		"Damage / DPS": "%.1f / %.1f" % [damage_dealt, damage_dealt / duration],
 		"Seed": run_seed_text,
-		"Sector": "STATIC_PROOF", "Boss": "DEFEATED" if victory else ("ACTIVE / PHASE %d" % boss.phase if is_instance_valid(boss) else ("NOT DEFEATED" if boss_spawned else "NOT REACHED")),
-		"Run mode": ("LAB / %s / %s" % [_lab_fixture.to_upper(), _lab_loadout.to_upper()]) if _combat_lab else (_chassis.to_upper() + " KIT" if _combo_mode else ("DEBUG / BOSS SKIP" if debug_boss_skip else "STANDARD")),
+		"Sector": "RELAY_PROOF" if is_instance_valid(substrate) else "STATIC_PROOF", "Boss": "DEFEATED" if victory and boss_spawned else ("ACTIVE / PHASE %d" % boss.phase if is_instance_valid(boss) else ("NOT DEFEATED" if boss_spawned else "NOT REACHED")),
+		"Run mode": ("EXPEDITION / " + _campaign_kind.to_upper()) if _campaign_mode else (("LAB / %s / %s" % [_lab_fixture.to_upper(), _lab_loadout.to_upper()]) if _combat_lab else (_chassis.to_upper() + " KIT" if _combo_mode else ("DEBUG / BOSS SKIP" if debug_boss_skip else "STANDARD"))),
 		"Level": level, "XP collected": total_xp_collected, "XP toward next level": "%d / %d" % [xp, xp_needed],
 		"Pickups collected": pickups_collected, "Patches installed": "%d types / %d ranks" % [upgrades.size(), patch_ranks],
 	}})
@@ -941,11 +1145,13 @@ func _build_run_report(victory: bool) -> Dictionary:
 		combo["maneuver"] = ChassisCatalogScript.get_ship(_chassis)["maneuver"]
 		combo["maneuver_cooldown"] = player.maneuver_cooldown
 		sections.append({"title": _chassis.to_upper() + " KIT", "rows": combo})
+	if is_instance_valid(substrate):
+		sections.append({"title": "SUBSTRATE / OBSERVATIONS", "rows": substrate.snapshot()})
 	return {"sections": sections, "scorecard": {
 		"time": elapsed_time, "kills": kills, "level": level,
 		"damage": damage_dealt, "dps": damage_dealt / duration,
 		"kills_per_minute": kills * 60.0 / duration,
-		"seed": run_seed_text, "sector": "STATIC_PROOF",
+		"seed": run_seed_text, "sector": _campaign_kind.to_upper() if _campaign_mode else ("RELAY_PROOF" if is_instance_valid(substrate) else "STATIC_PROOF"),
 		"boss": sections[0]["rows"]["Boss"], "mode": sections[0]["rows"]["Run mode"],
 		"xp": total_xp_collected, "pickups": pickups_collected,
 		"level_xp": xp, "next_xp": xp_needed,
@@ -957,6 +1163,14 @@ func _build_run_report(victory: bool) -> Dictionary:
 		"combo": combo, "chassis": (ChassisCatalogScript.get_ship(_chassis)["name"] + " / 01") if _combo_mode else "COURIER / 01",
 		"flight": player.get_flight_telemetry(),
 		"zoom": combat_view.zoom_level,
+		"substrate": substrate.snapshot() if is_instance_valid(substrate) else {},
+		"transit": transit_result.duplicate(true),
+		"facility": facility_result.duplicate(true),
+		"recovery": recovery_result.duplicate(true),
+		"expedition": expedition_result.duplicate(true),
+		"tactical": tactical_result.duplicate(true),
+		"sector_map": expedition.snapshot() if is_instance_valid(expedition) else {},
+		"failure_reason": _campaign_failure_reason,
 	}}
 
 
@@ -1065,6 +1279,20 @@ func _update_hud(force: bool = false) -> void:
 		status["field_active"] = is_instance_valid(graviton.field) and not graviton.field.expired
 	if _combat_lab:
 		status.erase("fps")
+	if is_instance_valid(substrate):
+		status["substrate"] = substrate.snapshot()
+	if is_instance_valid(transit):
+		status["campaign_objective"] = transit.snapshot()["text"]
+	if is_instance_valid(facility):
+		status["campaign_objective"] = facility.snapshot()["text"]
+	if is_instance_valid(recovery):
+		status["campaign_objective"] = recovery.snapshot()["text"]
+	if is_instance_valid(picket):
+		status["campaign_objective"] = picket.snapshot()["text"]
+	if is_instance_valid(expedition):
+		status["campaign_objective"] = expedition.snapshot()["text"]
+	if is_instance_valid(tactical):
+		status["campaign_objective"] = tactical.snapshot()["text"]
 	if force:
 		status["message"] = "SIGNAL LOCKED"
 	hud.set_status(status)
@@ -1120,7 +1348,7 @@ func _parse_command_line() -> void:
 		run_seed_text = END_SCREEN_CAPTURE_SEED
 	if _smoke_test or _capture_end_screen:
 		_combo_mode = false
-	if _lab_fixture not in ["cluster", "dispersed", "boss", "orbit"]:
+	if _lab_fixture not in ["cluster", "dispersed", "boss", "orbit", "substrate"]:
 		_lab_fixture = "cluster"
 	if _lab_loadout not in ["salvo", "gravity", "chain"]:
 		_lab_loadout = "chain"

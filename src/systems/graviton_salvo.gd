@@ -165,6 +165,7 @@ func _launch_one() -> void:
 	var destination := target.global_position if is_instance_valid(target) else focus
 	var missile: SwarmMissile = MissileScript.new()
 	missile.configure(origin, (direction + side.normalized() * 0.75).normalized(), destination, target)
+	missile.combat_geometry.assign(player.combat_geometry)
 	missile.detonated.connect(_on_detonation)
 	missile.retired.connect(_on_retired)
 	get_parent().add_child(missile)
@@ -223,7 +224,8 @@ func _target_candidates(center: Vector2, radius: float) -> Array[Node2D]:
 	var result: Array[Node2D] = []
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		if is_instance_valid(enemy) and not enemy.is_queued_for_deletion() and enemy is Node2D and enemy.has_method("is_alive") and enemy.is_alive() and enemy.global_position.distance_to(center) < radius:
-			result.append(enemy)
+			if CombatGeometry.clear(center,enemy.global_position,player.combat_geometry) and CombatGeometry.clear(player.global_position,enemy.global_position,player.combat_geometry):
+				result.append(enemy)
 	result.sort_custom(func(a: Node2D, b: Node2D): return a.global_position.distance_squared_to(center) < b.global_position.distance_squared_to(center))
 	return result
 

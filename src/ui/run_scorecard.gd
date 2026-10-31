@@ -59,7 +59,11 @@ func _draw() -> void:
 	var origin := (size - canvas * zoom) * 0.5
 	draw_set_transform(origin, 0.0, Vector2.ONE * zoom)
 	_header(canvas.x, compact)
-	if not compact:
+	if page == 6 and not data.get("sector_map", {}).is_empty():
+		_sector_map(Rect2(0, 56 if compact else 82, canvas.x, canvas.y - (56 if compact else 82)))
+	elif page == 5 and not data.get("substrate", {}).is_empty():
+		_substrate(Rect2(0, 56 if compact else 82, canvas.x, canvas.y - (56 if compact else 82)))
+	elif not compact:
 		_metrics(Rect2(0, 82, 1200, 79), 5)
 		_arsenal(Rect2(0, 175, 598, 251))
 		_ship(Rect2(610, 175, 286, 251))
@@ -93,20 +97,49 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO)
 
 
+func _sector_map(r: Rect2) -> void:
+	var sector: Dictionary=data.get("sector_map",{})
+	_panel(r,"MEMORY SPINE / ROUTE MAP","%d / 9" % int(sector.get("secured",0)))
+	var bounds: Rect2=sector["bounds"]
+	var area := Rect2(r.position+Vector2(20,42),r.size-Vector2(40,104))
+	var zoom := minf(area.size.x/bounds.size.x,area.size.y/bounds.size.y)
+	var origin := area.get_center()-bounds.size*zoom*0.5
+	var base_point: Vector2=origin+(Vector2(sector["base"])-bounds.position)*zoom
+	for site in sector["sites"]:
+		var point: Vector2=origin+(Vector2(site["position"])-bounds.position)*zoom
+		var color := GREEN if site["done"] else (AMBER if site["active"] else MUTED)
+		draw_line(base_point,point,EDGE,1,true)
+		match str(site["kind"]):
+			"relay": draw_rect(Rect2(point-Vector2(5,5),Vector2(10,10)),color,false,2)
+			"survey": draw_arc(point,6,0,TAU,16,color,2,true)
+			_: draw_polyline(PackedVector2Array([point+Vector2(0,-7),point+Vector2(6,0),point+Vector2(0,7),point+Vector2(-6,0),point+Vector2(0,-7)]),color,2,true)
+		_text(str(int(site["id"])+1)+(" OK" if site["done"] else ""),point+Vector2(10,4),11,color,70)
+	draw_rect(Rect2(base_point-Vector2(6,6),Vector2(12,12)),CYAN)
+	_text("CRADLE",base_point+Vector2(11,4),11,CYAN,85)
+	var ship: Vector2=origin+(Vector2(sector["player"])-bounds.position)*zoom
+	draw_circle(ship,4,PAPER)
+	draw_arc(ship,10,0,TAU,24,PAPER,1,true)
+	_text("SQUARE relay / RING survey / DIAMOND cargo",r.position+Vector2(14,r.size.y-43),11,PAPER,r.size.x-28)
+	_text("Green = secured / Amber = activated / White = you",r.position+Vector2(14,r.size.y-25),11,MUTED,r.size.x-28)
+	_text("One cargo slot. Return records to the cyan cradle.",r.position+Vector2(14,r.size.y-8),11,CYAN,r.size.x-28)
+
+
 func _header(w: float, compact: bool) -> void:
-	var accent := GREEN if victory else RED
+	var live: bool = data.get("in_progress", false)
+	var accent := CYAN if live else (GREEN if victory else RED)
 	draw_line(Vector2.ZERO, Vector2(w, 0), accent, 3.0)
 	if compact:
-		_text("RUN COMPLETE" if victory else "PROCESS TERMINATED", Vector2(0, 24), 21, PAPER, w * 0.74)
+		_text("RUN SUSPENDED" if live else ("RUN COMPLETE" if victory else "PROCESS TERMINATED"), Vector2(0, 24), 21, PAPER, w * 0.74)
 		_text("VOID//DAEMON", Vector2(w * 0.76, 23), 11, accent, w * 0.24, HORIZONTAL_ALIGNMENT_RIGHT)
 		_text("SEED " + str(data.get("seed", "--")), Vector2(0, 44), 10, MUTED, w * 0.66)
 		_text(str(data.get("mode", "STANDARD")), Vector2(w * 0.67, 44), 10, AMBER, w * 0.33, HORIZONTAL_ALIGNMENT_RIGHT)
 		return
 	_text("VOID//DAEMON     /     FLIGHT RECORDER", Vector2(0, 22), 12, MUTED, 800)
-	_text("TRANSMISSION COMPLETE" if victory else "PROCESS TERMINATED", Vector2(0, 54), 29, PAPER, 800)
+	_text("PROCESS SUSPENDED / LIVE STATS" if live else ("TRANSMISSION COMPLETE" if victory else "PROCESS TERMINATED"), Vector2(0, 54), 29, PAPER, 800)
 	_text("SEED " + str(data.get("seed", "--")) + "   /   " + str(data.get("sector", "STATIC_PROOF")), Vector2(0, 73), 11, MUTED, 800)
 	_text(str(data.get("chassis", "COURIER / 01")), Vector2(w - 280, 23), 12, CYAN, 190, HORIZONTAL_ALIGNMENT_RIGHT)
-	_text("BOSS: " + str(data.get("boss", "NOT REACHED")), Vector2(w - 340, 47), 11, accent, 250, HORIZONTAL_ALIGNMENT_RIGHT)
+	var objective: Dictionary = data.get("substrate", {})
+	_text("OBJECTIVE: " + str(objective["objective"]) if not objective.is_empty() else ("BOSS: " + str(data.get("boss", "NOT REACHED"))), Vector2(w - 340, 47), 11, accent, 250, HORIZONTAL_ALIGNMENT_RIGHT)
 	_text(str(data.get("mode", "STANDARD")), Vector2(w - 340, 68), 11, MUTED, 250, HORIZONTAL_ALIGNMENT_RIGHT)
 	var c := Vector2(w - 37, 43)
 	draw_arc(c, 29, 0, TAU, 32, EDGE, 1, true)
@@ -229,7 +262,7 @@ func _reactor(r: Rect2) -> void:
 	var width := r.size.x - 28
 	var x := r.position.x + 14
 	var y := r.position.y + 44
-	_text("FINAL HEAT", Vector2(x, y), 10, MUTED, width * 0.50)
+	_text("CURRENT HEAT" if data.get("in_progress", false) else "FINAL HEAT", Vector2(x, y), 10, MUTED, width * 0.50)
 	_text("%.1f / %.0f" % [data.get("heat", 0), data.get("max_heat", 100)], Vector2(x + width * 0.50, y), 17, AMBER, width * 0.50, HORIZONTAL_ALIGNMENT_RIGHT)
 	_bar(Rect2(x, y + 8, width, 7), float(data.get("heat", 0)) / maxf(float(data.get("max_heat", 100)), 1), AMBER)
 	y += 38
@@ -286,6 +319,16 @@ func _recovery(r: Rect2) -> void:
 	var y := r.position.y + 45
 	var width := r.size.x - 28
 	var enemies: Dictionary = data.get("enemies", {})
+	var substrate: Dictionary = data.get("substrate", {})
+	if not substrate.is_empty():
+		var state: Dictionary = substrate["memory"]
+		_rows([
+			["OBJECTIVE", substrate["objective"]],
+			["REPORTS / BLOCKED", "%d / %d" % [substrate["reports"], substrate["prevented"]]],
+			["OBSERVED SAMPLES", str(state["samples"]) + " / 6 NEEDED"],
+			["INSPECT", "MIND TAB / KNOWLEDGE"],
+		], Vector2(x, r.position.y + 48), width, minf(27, (r.size.y - 50) / 4))
+		return
 	var short := r.size.y < 130
 	var slot := width * (0.48 if short else 1.0) / 4
 	for i in range(4):
@@ -319,6 +362,44 @@ func _recovery(r: Rect2) -> void:
 		_text("%.1f KILLS / MIN" % float(data.get("kills_per_minute", 0)), Vector2(x, r.end.y - 15), 11, MUTED, width)
 	elif is_compact():
 		_text("BOSS " + str(data.get("boss", "NOT REACHED")) + " / " + str(data.get("sector", "STATIC_PROOF")), Vector2(x, r.end.y - 8), 9, MUTED, width)
+
+
+func _substrate(r: Rect2) -> void:
+	var s: Dictionary = data.get("substrate", {})
+	var m: Dictionary = s.get("memory", {})
+	_panel(r, "07 / SUBSTRATE / SESSION INTELLIGENCE")
+	var small := r.size.x < 700
+	var names := ["E", "SE", "S", "SW", "W", "NW", "N", "NE"]
+	var heading := int(m.get("heading_bin", -1))
+	var belief: String = names[heading] + "BOUND" if heading >= 0 else "UNCONFIRMED"
+	var x := r.position.x + 14
+	var y := r.position.y + 48
+	var width := r.size.x - 28
+	var rows := [
+		["OBJECTIVE / RELAY", "%s / %s" % [s.get("objective", "--"), "ON" if s.get("link", false) else "OFF"]],
+		["REPORTS / PREVENTED / QUEUED", "%d / %d / %d" % [s.get("reports", 0), s.get("prevented", 0), s.get("pending", 0)]],
+		["TRAVEL HYPOTHESIS", belief],
+		["SAMPLES / DOMINANT SHARE", "%d / %.0f%%" % [m.get("samples", 0), float(m.get("confidence", 0)) * 100]],
+	]
+	if small:
+		# Stacked text is readable in portrait; fixed rows also fit short landscape.
+		var advance := (r.size.y - 65) / 9
+		for row in rows:
+			_text(row[0] + "  " + row[1], Vector2(x, y), 10, CYAN, width)
+			y += advance
+		for unit: Dictionary in s.get("units", []):
+			_text("%s: %s" % [unit["id"].to_upper(), unit["task"]], Vector2(x, y), 10, PAPER, width)
+			y += advance
+	else:
+		_rows(rows, Vector2(x, y), width, 32)
+		y += 146
+		_text("LIVE UNITS / LOCAL TASK / ATTACK STATE", Vector2(x, y), 12, AMBER, width)
+		y += 30
+		for unit: Dictionary in s.get("units", []):
+			_text("%s   /   %s   /   %s   /   HP %.0f" % [unit["id"].to_upper(), unit["task"], unit["state"].to_upper(), unit["health"]], Vector2(x, y), 13, PAPER, width)
+			y += 29
+		_text("6 SAMPLES / 67% AGREEMENT / 8s MEMORY / 1.25s REPORT DELAY", Vector2(x, r.end.y - 34), 11, MUTED, width)
+		_text("ONLY DELIVERED SIGHTINGS TEACH THE SWARM. BREAK THE RELAY OR DECEIVE IT.", Vector2(x, r.end.y - 14), 11, CYAN, width)
 
 
 func _build(r: Rect2, columns: int) -> void:

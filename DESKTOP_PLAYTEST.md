@@ -1,6 +1,10 @@
 # VOID//DAEMON — Windows desktop playtest
 
-Build: `desktop-2026.10.19.3`. The title bar identifies the build and mode. See the included [experience checklist](EXPERIENCE_PLAYTEST.md) for the four chassis, inertial flight, hive and audio pass.
+Build: `desktop-2026.10.29.3` (local playable campaign candidate; the last published release is October 19). The title bar identifies the build and mode. Choose NEW EXPEDITION or run `Play Expedition.cmd` for eleven connected missions and three illustrated story interludes. Full normal-input tests measure 19:30–20:54 active simulation across all four chassis, excluding reading and with no failed missions. Read CAMPAIGN_PLAYTEST.md for objectives, checkpoints and remaining human/device gates. M opens the Memory Spine map; touch uses II then MAP. Older desktop shortcuts have not been updated. See the included [experience checklist](EXPERIENCE_PLAYTEST.md) for the four chassis, inertial flight, hive and audio pass.
+
+New playable encounter: choose Substrate Encounter / Relay Proof in the hangar, or lab F9. Destroy the relay, then extract left. See PLAYTEST_SUBSTRATE.md. Esc/P → MIND shows reports, hypotheses and unit tasks. `Play Substrate Encounter.cmd` launches it directly. Existing desktop icons still target their earlier build unless explicitly updated.
+
+New in this candidate: Esc/P, controller Start and touch II open full live stats without ending the run. Resume preserves the encounter. F7/Report in the lab now inspects rather than terminates. Pause Options includes in-run audio/accessibility controls. Copy your Ogg Vorbis/MP3/PCM WAV music into `music` beside the EXE; open the hangar or use Reload Local Music. MUSIC has independent volume and ducks beneath hive feeds. No actual supplied tracks have been auditioned yet. See `music/README.md` for context playlists.
 
 ## Play without Godot
 
@@ -20,14 +24,15 @@ In a source checkout, `play_combo_lab.cmd` opens the lab and `run_game.cmd` open
 | Mouse | Aim priority |
 | Hold M1 / release | Selected chassis attack: salvo, beam, clamp/collapse or close plasma |
 | Shift or Space | Selected chassis maneuver; one shared action/cooldown, never shield |
-| Esc / P | Pause / resume |
+| Esc / P | Live stats / resume; Pause Options opens other operations |
 | 1 / 2 / 3 or click | Select an upgrade during survival |
 | T | Toggle touch preview |
 | Lab F1 / F2 / F3 | Cluster / Dispersed / Boss |
 | Lab F8 | Orbit Field flight/gravity fixture |
+| Lab F9 | Substrate relay perception/coordination proof |
 | Lab F4 / F5 / F6 | Chassis diagnostic / base kit / patched chain; Graviton retains its original comparison |
 | Lab R | Reset the selected fixture |
-| Lab F7 / Report | Actual scorecard; restart preserves fixture/loadout |
+| Lab F7 / Report | Live scorecard; Resume preserves the encounter, fixture and loadout |
 
 Shield regenerates passively. M2/Q has no combat action in this kit; Q quits only inside the pause menu. Classic mode has different VENT controls. F10 is a debug boss shortcut, not a legitimate full-run result.
 
@@ -48,4 +53,4 @@ The rendered source lab opened on the user's AMD Radeon desktop; external mouse 
 
 ## Rebuild
 
-Install Godot 4.7.1 or use the ignored portable copy in `.tools/godot`. Run `python scripts/fetch_windows_template.py` to fetch the official matching Windows runtime into `.tools/windows` (HTTPS ranges and ZIP CRC checked). Also place the upstream engine LICENSE.txt and COPYRIGHT.txt there as `GODOT-LICENSE.txt` and `GODOT-COPYRIGHT.txt`. Run `build_windows.cmd`. The release preset embeds resources and excludes tests, screenshots, development notes and old builds. Output and generated `build.json` are under ignored `builds/windows-desktop-2026.10.19.3`; the manifest records the source commit, dirty state, and executable SHA-256.
+Install Godot 4.7.1 or use the ignored portable copy in `.tools/godot`. Run `python scripts/fetch_windows_template.py` to fetch the official matching Windows runtime into `.tools/windows` (HTTPS ranges and ZIP CRC checked). Also place the upstream engine LICENSE.txt and COPYRIGHT.txt there as `GODOT-LICENSE.txt` and `GODOT-COPYRIGHT.txt`. Run `build_windows.cmd`. The release preset embeds resources and excludes tests, screenshots, development notes and old builds. Output and generated `build.json` are under ignored `builds/windows-desktop-2026.10.22.1`; the manifest records the source commit, dirty state, and executable SHA-256. This candidate is built from local changes, not represented as a clean published checkpoint.

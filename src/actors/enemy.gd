@@ -1,6 +1,8 @@
 class_name Enemy
 extends Area2D
 
+var combat_geometry: Array[Rect2] = []
+
 ## Deterministic fixed-tick enemy actor. It owns movement, collision, health,
 ## telegraphs, and signals, but delegates projectile spawning and player damage
 ## to its caller so it remains independent of any Main scene.
@@ -192,6 +194,8 @@ func _physics_process(delta: float) -> void:
 	var resistance := 0.16 if _state == STATE_CHARGE else 0.65
 	_navigation_velocity = (_navigation_velocity * exp(-0.8 * delta) + navigation_force * resistance * delta).limit_length(210)
 	global_position += (velocity + _gravity_velocity + _navigation_velocity) * delta
+	if not combat_geometry.is_empty():
+		global_position = CombatGeometry.resolve(global_position,collision_radius,combat_geometry)
 	_gravity_velocity = Vector2.ZERO
 	_emit_contact_hits()
 	queue_redraw()
@@ -375,7 +379,7 @@ func _refresh_target_position() -> bool:
 	if _target != null:
 		if is_instance_valid(_target):
 			_target_position = _target.global_position
-			return true
+			return CombatGeometry.clear(global_position,_target_position,combat_geometry)
 		_target = null
 	return _has_target_position
 

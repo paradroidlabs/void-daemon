@@ -4,6 +4,7 @@ signal changed
 
 var master_volume := 0.8
 var effects_volume := 0.85
+var music_volume := 0.65
 var hive_volume := 0.65
 var hive_voice := true
 var narrative_windows := true
@@ -17,11 +18,12 @@ func _ready() -> void:
 	process_mode = PROCESS_MODE_ALWAYS
 	var config := ConfigFile.new()
 	if config.load("user://experience.cfg") == OK:
-		for key in ["master_volume", "effects_volume", "hive_volume", "hive_voice", "narrative_windows", "reduced_effects", "selected_chassis"]:
+		for key in ["master_volume", "effects_volume", "music_volume", "hive_volume", "hive_voice", "narrative_windows", "reduced_effects", "selected_chassis"]:
 			if config.has_section_key("experience", key):
 				set(key, config.get_value("experience", key))
 	master_volume = clampf(master_volume, 0, 1)
 	effects_volume = clampf(effects_volume, 0, 1)
+	music_volume = clampf(music_volume, 0, 1)
 	hive_volume = clampf(hive_volume, 0, 1)
 	AudioServer.set_bus_volume_db(0, linear_to_db(maxf(master_volume, 0.0001)))
 	AudioServer.set_bus_mute(0, master_volume <= 0)
@@ -43,7 +45,7 @@ func update_setting(key: String, value: Variant) -> void:
 		stop_voice()
 	if persist:
 		var config := ConfigFile.new()
-		for field in ["master_volume", "effects_volume", "hive_volume", "hive_voice", "narrative_windows", "reduced_effects", "selected_chassis"]:
+		for field in ["master_volume", "effects_volume", "music_volume", "hive_volume", "hive_voice", "narrative_windows", "reduced_effects", "selected_chassis"]:
 			config.set_value("experience", field, get(field))
 		config.save("user://experience.cfg")
 	changed.emit()
@@ -69,14 +71,15 @@ func stop_voice() -> void:
 func create_controls(compact: bool = false) -> VBoxContainer:
 	var rows := VBoxContainer.new()
 	rows.add_theme_constant_override("separation", 5 if compact else 10)
-	for field in ["master_volume", "effects_volume", "hive_volume"]:
+	for field in ["master_volume", "effects_volume", "music_volume", "hive_volume"]:
 		var row := HBoxContainer.new()
 		var label := Label.new()
-		label.text = {"master_volume": "MASTER", "effects_volume": "EFFECTS", "hive_volume": "HIVE VOICE"}[field]
+		label.text = {"master_volume": "MASTER", "effects_volume": "EFFECTS", "music_volume": "MUSIC", "hive_volume": "HIVE VOICE"}[field]
 		label.custom_minimum_size.x = 114
 		label.add_theme_font_size_override("font_size", 12)
 		row.add_child(label)
 		var slider := HSlider.new()
+		slider.name = field
 		slider.custom_minimum_size = Vector2(120, 44)
 		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		slider.min_value = 0
@@ -94,4 +97,20 @@ func create_controls(compact: bool = false) -> VBoxContainer:
 		button.button_pressed = get(field)
 		button.toggled.connect(func(value: bool): update_setting(field, value))
 		rows.add_child(button)
+	var reload_music := Button.new()
+	reload_music.name = "ReloadMusicButton"
+	reload_music.text = "RELOAD LOCAL MUSIC"
+	reload_music.custom_minimum_size.y = 44
+	rows.add_child(reload_music)
+	var music_status := Label.new()
+	music_status.add_theme_font_size_override("font_size", 11)
+	music_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var update_music_status := func():
+		var count := 0
+		for tracks: Array in Music.playlists.values():
+			count += tracks.size()
+		music_status.text = "LOCAL MUSIC: %d TRACKS / OGG, MP3, WAV\nDrop into music beside the EXE, or assets/music in source." % count
+	update_music_status.call()
+	reload_music.pressed.connect(func(): Music.reload_library(); update_music_status.call())
+	rows.add_child(music_status)
 	return rows
